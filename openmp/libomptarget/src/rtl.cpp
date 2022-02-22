@@ -38,6 +38,8 @@ PluginManager *PM;
 static char *ProfileTraceFile = nullptr;
 #endif
 
+std::unordered_set<__tgt_device_image *> RegisteredJITImages;
+
 __attribute__((constructor(101))) void init() {
   DP("Init target library!\n");
 
@@ -248,8 +250,7 @@ static void RegisterImageIntoTranslationTable(TranslationTable &TT,
 
 static void RegisterGlobalCtorsDtorsForImage(__tgt_bin_desc *desc,
                                              __tgt_device_image *img,
-                                             RTLInfoTy *RTL) {
-
+                                             RTLInfoTy *RTL, bool IsJITImage) {
   for (int32_t i = 0; i < RTL->NumberOfDevices; ++i) {
     DeviceTy &Device = *PM->Devices[RTL->Idx + i];
     Device.PendingGlobalsMtx.lock();
@@ -259,13 +260,21 @@ static void RegisterGlobalCtorsDtorsForImage(__tgt_bin_desc *desc,
       if (entry->flags & OMP_DECLARE_TARGET_CTOR) {
         DP("Adding ctor " DPxMOD " to the pending list.\n",
            DPxPTR(entry->addr));
-        Device.PendingCtorsDtors[desc].PendingCtors.push_back(entry->addr);
+        if (IsJITImage)
+          Device.PendingCtorsDtors[desc].PendingJITCtors[img].push_back(
+              entry->addr);
+        else
+          Device.PendingCtorsDtors[desc].PendingCtors.push_back(entry->addr);
       } else if (entry->flags & OMP_DECLARE_TARGET_DTOR) {
         // Dtors are pushed in reverse order so they are executed from end
         // to beginning when unregistering the library!
         DP("Adding dtor " DPxMOD " to the pending list.\n",
            DPxPTR(entry->addr));
-        Device.PendingCtorsDtors[desc].PendingDtors.push_front(entry->addr);
+        if (IsJITImage)
+          Device.PendingCtorsDtors[desc].PendingJITDtors[img].push_front(
+              entry->addr);
+        else
+          Device.PendingCtorsDtors[desc].PendingDtors.push_front(entry->addr);
       }
 
       if (entry->flags & OMP_DECLARE_TARGET_LINK) {
@@ -361,14 +370,21 @@ void RTLsTy::RegisterLib(__tgt_bin_desc *desc) {
     // Scan the RTLs that have associated images until we find one that supports
     // the current image.
     for (auto &R : AllRTLs) {
-      if (!R.is_valid_binary(img)) {
+      int Ret = R.is_valid_binary(img);
+      if (Ret == 0) {
         DP("Image " DPxMOD " is NOT compatible with RTL %s!\n",
            DPxPTR(img->ImageStart), R.RTLName.c_str());
         continue;
       }
 
-      DP("Image " DPxMOD " is compatible with RTL %s!\n",
-         DPxPTR(img->ImageStart), R.RTLName.c_str());
+      // TODO: should use enum here.
+      const bool IsJITImage = Ret == 2;
+
+      DP("%sImage " DPxMOD " is compatible with RTL %s!\n",
+         IsJITImage ? "JIT " : "", DPxPTR(img->ImageStart), R.RTLName.c_str());
+
+      if (IsJITImage)
+        RegisteredJITImages.insert(img);
 
       initRTLonce(R);
 
@@ -393,7 +409,7 @@ void RTLsTy::RegisterLib(__tgt_bin_desc *desc) {
       FoundRTL = &R;
 
       // Load ctors/dtors for static objects
-      RegisterGlobalCtorsDtorsForImage(desc, img, FoundRTL);
+      RegisterGlobalCtorsDtorsForImage(desc, img, FoundRTL, IsJITImage);
 
       // if an RTL was found we are done - proceed to register the next image
       break;
@@ -424,6 +440,9 @@ void RTLsTy::UnregisterLib(__tgt_bin_desc *desc) {
     for (auto *R : UsedRTLs) {
 
       assert(R->isUsed && "Expecting used RTLs.");
+
+      // FIXME: This is WRONG!!!
+      continue;
 
       if (!R->is_valid_binary(img)) {
         DP("Image " DPxMOD " is NOT compatible with RTL " DPxMOD "!\n",
