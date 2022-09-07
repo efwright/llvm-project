@@ -175,6 +175,7 @@ Function *OpenMPIRBuilder::getOrCreateRuntimeFunctionPtr(RuntimeFunction FnID) {
 void OpenMPIRBuilder::initialize() { initializeTypes(M); }
 
 void OpenMPIRBuilder::finalize(Function *Fn) {
+LLVM_DEBUG(dbgs() << "********* FINALIZE!!!!!\n");
   SmallPtrSet<BasicBlock *, 32> ParallelRegionBlockSet;
   SmallVector<BasicBlock *, 32> Blocks;
   SmallVector<OutlineInfo, 16> DeferredOutlines;
@@ -221,7 +222,7 @@ void OpenMPIRBuilder::finalize(Function *Fn) {
     // one with the parallel region.
     OutlinedFn->removeFromParent();
     M.getFunctionList().insertAfter(OuterFn->getIterator(), OutlinedFn);
-
+LLVM_DEBUG(dbgs() << "o1\n");
     // Remove the artificial entry introduced by the extractor right away, we
     // made our own entry block after all.
     {
@@ -246,12 +247,14 @@ void OpenMPIRBuilder::finalize(Function *Fn) {
 
         I.moveBefore(*OI.EntryBB, OI.EntryBB->getFirstInsertionPt());
       }
+LLVM_DEBUG(dbgs() << "o2\n");
 
       OI.EntryBB->moveBefore(&ArtificialEntry);
       ArtificialEntry.eraseFromParent();
     }
     assert(&OutlinedFn->getEntryBlock() == OI.EntryBB);
     assert(OutlinedFn && OutlinedFn->getNumUses() == 1);
+LLVM_DEBUG(dbgs() << "o3\n");
 
     // Run a user callback, e.g. to add attributes.
     if (OI.PostOutlineCB)
@@ -260,6 +263,8 @@ void OpenMPIRBuilder::finalize(Function *Fn) {
 
   // Remove work items that have been completed.
   OutlineInfos = std::move(DeferredOutlines);
+LLVM_DEBUG(dbgs() << "o4\n");
+
 }
 
 OpenMPIRBuilder::~OpenMPIRBuilder() {
@@ -537,6 +542,459 @@ void OpenMPIRBuilder::emitCancelationCheckImpl(Value *CancelFlag,
 
   // The continuation block is where code generation continues.
   Builder.SetInsertPoint(NonCancellationBlock, NonCancellationBlock->begin());
+}
+
+IRBuilder<>::InsertPoint OpenMPIRBuilder::testLoopWrapper(
+  const LocationDescription &Loc, InsertPointTy OuterAllocaIP
+)
+{
+  assert(!isConflictIP(Loc.IP, OuterAllocaIP) && "IPs must not be ambiguous");
+
+  printf("testLoopWrapper\n");
+
+  if (!updateToLocation(Loc))
+    return Loc.IP;
+}
+
+IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
+    const LocationDescription &Loc, InsertPointTy OuterAllocaIP,
+    std::function<void(InsertPointTy, InsertPointTy, BasicBlock&, Value*, EmittedClosureTy)> BodyGenCB, PrivatizeCallbackTy PrivCB,
+    FinalizeCallbackTy FiniCB, Value *IfCondition, Value *NumThreads,
+    omp::ProcBindKind ProcBind, bool IsCancellable,
+    std::function<std::tuple<Value*,EmittedClosureTy>(InsertPointTy)> DistanceCB,
+    std::function<void(InsertPointTy, Value*)> LoopVarCB) {
+//    Value *Start, Value *Stop, Value *Step) {
+  assert(!isConflictIP(Loc.IP, OuterAllocaIP) && "IPs must not be ambiguous");
+
+  if (!updateToLocation(Loc))
+    return Loc.IP;
+  LLVM_DEBUG(dbgs() << "Starting createDistribute\n");
+  //LLVM_DEBUG(dbgs() << "DistVal " << *DistVal << "\n");
+
+  uint32_t SrcLocStrSize;
+  Constant *SrcLocStr = getOrCreateSrcLocStr(Loc, SrcLocStrSize);
+  Value *Ident = getOrCreateIdent(SrcLocStr, SrcLocStrSize);
+  Value *ThreadID = getOrCreateThreadID(Ident);
+
+  using EmittedClosureTy = std::pair<llvm::Function *, llvm::Value *>;
+
+  /*auto *IndVarTy = cast<IntegerType>(Start->getType());
+  assert(IndVarTy == Stop->getType() && "Stop type mismatch");
+  assert(IndVarTy == Step->getType() && "Step type mismatch");
+
+  LocationDescription ComputeLoc =
+      ComputeIP.isSet() ? LocationDescription(ComputeIP, Loc.DL) : Loc;
+  updateToLocation(ComputeLoc);
+
+  ConstantInt *Zero = ConstantInt::get(IndVarTy, 0);
+  ConstantInt *One = ConstantInt::get(IndVarTy, 1);
+
+  // Like Step, but always positive.
+  Value *Incr = Step;
+
+  // Distance between Start and Stop; always positive.
+  Value *Span = Builder.CreateSub(Stop, Start, "", true);
+  ZeroCmp = Builder.CreateICmp(CmpInst::ICMP_ULE, Stop, Start);
+
+  Value *CountIfLooping;
+  // Avoid incrementing past stop since it could overflow.
+  Value *CountIfTwo = Builder.CreateAdd(
+      Builder.CreateUDiv(Builder.CreateSub(Span, One), Incr), One);
+  Value *OneCmp = Builder.CreateICmp(CmpInst::ICMP_ULE, Span, Incr);
+  CountIfLooping = Builder.CreateSelect(OneCmp, One, CountIfTwo);
+  Value *TripCount = Builder.CreateSelect(ZeroCmp, Zero, CountIfLooping,
+                                          "omp.tripcount");
+
+  Value *Span = Builder.CreateMul(IV, Step);
+  Value *IndVar = Builder.CreateAdd(Span, Start);
+
+  LLVM_DEBUG(dbg() << "Span= " << *Span << "\n");
+  LLVM_DEBUG(dbg() << "IndVar= " << *IndVar << "\n");
+*/
+  BasicBlock *InsertBB = Builder.GetInsertBlock();
+  Function *OuterFn = InsertBB->getParent();
+
+  LLVM_DEBUG(dbgs() << "At the start: " << *OuterFn << "\n");
+
+
+
+  // Save the outer alloca block because the insertion iterator may get
+  // invalidated and we still need this later.
+  BasicBlock *OuterAllocaBlock = OuterAllocaIP.getBlock();
+
+  // Vector to remember instructions we used only during the modeling but which
+  // we want to delete at the end.
+  SmallVector<Instruction *, 6> ToBeDeleted;
+
+  // Change the location to the outer alloca insertion point to create and
+  // initialize the allocas we pass into the parallel region.
+  Builder.restoreIP(OuterAllocaIP);
+  //DistanceCB();
+  //AllocaInst *TIDAddr = Builder.CreateAlloca(Int32, nullptr, "tid.addr");
+  //AllocaInst *ZeroAddr = Builder.CreateAlloca(Int32, nullptr, "zero.addr");
+  AllocaInst *OMPIV = Builder.CreateAlloca(Int32, nullptr, "omp.iv");
+
+  // If there is an if condition we actually use the TIDAddr and ZeroAddr in the
+  // program, otherwise we only need them for modeling purposes to get the
+  // associated arguments in the outlined function. In the former case,
+  // initialize the allocas properly, in the latter case, delete them later.
+  //if (IfCondition) {
+  //  Builder.CreateStore(Constant::getNullValue(Int32), TIDAddr);
+  //  Builder.CreateStore(Constant::getNullValue(Int32), ZeroAddr);
+  //} else {
+    //ToBeDeleted.push_back(TIDAddr);
+    //ToBeDeleted.push_back(ZeroAddr);
+    ToBeDeleted.push_back(OMPIV);
+  //}
+
+  LLVM_DEBUG(dbgs() << "Before distance func: " << *OuterFn << "\n");
+  //InsertPointTy DistanceGenIP(PRegEntryBB, PRegEntryBB->begin());
+  //Builder.SetInsertPoint(PRegEntryBB);
+  std::tuple<Value*, EmittedClosureTy> DistanceOutput = DistanceCB(OuterAllocaIP);
+  Value * DistVal = std::get<0>(DistanceOutput);
+  EmittedClosureTy LoopVarClosure = std::get<1>(DistanceOutput);
+
+  LLVM_DEBUG(dbgs() << "After distance func: " << *OuterFn << "\n");
+  LLVM_DEBUG(dbgs() << "DistVal: " << *DistVal << "\n");
+  LLVM_DEBUG(dbgs() << "omp.iv: " << *OMPIV << "\n");
+  LLVM_DEBUG(dbgs() << "LoopVarFunc: " << *LoopVarClosure.first << "\n");
+  LLVM_DEBUG(dbgs() << "LoopVar: " << *LoopVarClosure.second << "\n");
+  LLVM_DEBUG(dbgs() << "omp.iv type: " << OMPIV->getType() << "\n");
+  // Create an artificial insertion point that will also ensure the blocks we
+  // are about to split are not degenerated.
+  auto *UI = new UnreachableInst(Builder.getContext(), InsertBB);
+
+  Instruction *ThenTI = UI, *ElseTI = nullptr;
+  //if (IfCondition)
+  //  SplitBlockAndInsertIfThenElse(IfCondition, UI, &ThenTI, &ElseTI);
+
+  BasicBlock *ThenBB = ThenTI->getParent();
+  BasicBlock *PRegEntryBB = ThenBB->splitBasicBlock(ThenTI, "omp.dis.entry");
+  BasicBlock *PRegBodyBB =
+      PRegEntryBB->splitBasicBlock(ThenTI, "omp.dis.region");
+  BasicBlock *PRegPreFiniBB =
+      PRegBodyBB->splitBasicBlock(ThenTI, "omp.dis.pre_finalize");
+  BasicBlock *PRegExitBB =
+      PRegPreFiniBB->splitBasicBlock(ThenTI, "omp.dis.exit");
+
+  auto FiniCBWrapper = [&](InsertPointTy IP) {
+    // Hide "open-ended" blocks from the given FiniCB by setting the right jump
+    // target to the region exit block.
+    if (IP.getBlock()->end() == IP.getPoint()) {
+      IRBuilder<>::InsertPointGuard IPG(Builder);
+      Builder.restoreIP(IP);
+      Instruction *I = Builder.CreateBr(PRegExitBB);
+      IP = InsertPointTy(I->getParent(), I->getIterator());
+    }
+    assert(IP.getBlock()->getTerminator()->getNumSuccessors() == 1 &&
+           IP.getBlock()->getTerminator()->getSuccessor(0) == PRegExitBB &&
+           "Unexpected insertion point for finalization call!");
+    return FiniCB(IP);
+  };
+
+  //FinalizationStack.push_back({FiniCBWrapper, OMPD_parallel, IsCancellable});
+  FinalizationStack.push_back({FiniCBWrapper, OMPD_distribute, IsCancellable});
+
+  // Generate the privatization allocas in the block that will become the entry
+  // of the outlined function.
+  Builder.SetInsertPoint(PRegEntryBB->getTerminator());
+  InsertPointTy InnerAllocaIP = Builder.saveIP();
+
+  AllocaInst *PrivTIDAddr =
+      Builder.CreateAlloca(Int32, nullptr, "tid.addr.local");
+  Instruction *PrivTID = Builder.CreateLoad(Int32, PrivTIDAddr, "tid");
+
+  //DistanceCB();
+
+  // Add some fake uses for OpenMP provided arguments.
+  //ToBeDeleted.push_back(Builder.CreateLoad(Int32, TIDAddr, "tid.addr.use"));
+  //Instruction *ZeroAddrUse =
+  //    Builder.CreateLoad(Int32, ZeroAddr, "zero.addr.use");
+  //ToBeDeleted.push_back(ZeroAddrUse);
+  Instruction *OMPIVUse =
+      Builder.CreateLoad(Int32, OMPIV, "omp.iv.use");
+  ToBeDeleted.push_back(OMPIVUse);
+
+  //LLVM_DEBUG(dbgs() << "Before distance func: " << *OuterFn << "\n");
+  //InsertPointTy DistanceGenIP(PRegEntryBB, PRegEntryBB->begin());
+  //Builder.SetInsertPoint(PRegEntryBB);
+  //Value * DistVal = DistanceCB(DistanceGenIP);
+  //LLVM_DEBUG(dbgs() << "After distance func: " << *OuterFn << "\n");
+  //LLVM_DEBUG(dbgs() << "DistVal: " << *DistVal << "\n");
+
+  // ThenBB
+  //   |
+  //   V
+  // PRegionEntryBB         <- Privatization allocas are placed here.
+  //   |
+  //   V
+  // PRegionBodyBB          <- BodeGen is invoked here.
+  //   |
+  //   V
+  // PRegPreFiniBB          <- The block we will start finalization from.
+  //   |
+  //   V
+  // PRegionExitBB          <- A common exit to simplify block collection.
+  //
+
+  //LLVM_DEBUG(dbgs() << "Before loopvar codegen: " << *OuterFn << "\n");
+  //assert(LoopVarCB && "Expected loop variable generation callback!");
+  //LoopVarCB(InnerAllocaIP, OMPIV);
+  //LLVM_DEBUG(dbgs() << "After loopvar codegen: " << *OuterFn << "\n");
+
+  LLVM_DEBUG(dbgs() << "Before body codegen: " << *OuterFn << "\n");
+  assert(BodyGenCB && "Expected body generation callback!");
+  InsertPointTy CodeGenIP(PRegBodyBB, PRegBodyBB->begin());
+  BodyGenCB(InnerAllocaIP, CodeGenIP, *PRegPreFiniBB, OMPIV, LoopVarClosure);
+
+  LLVM_DEBUG(dbgs() << "After  body codegen: " << *OuterFn << "\n");
+
+  FunctionCallee RTLFn = getOrCreateRuntimeFunctionPtr(OMPRTL___test_distribute);  //OMPRTL___kmpc_fork_call);
+  if (auto *F = dyn_cast<llvm::Function>(RTLFn.getCallee())) {
+    if (!F->hasMetadata(llvm::LLVMContext::MD_callback)) {
+      LLVM_DEBUG(dbgs() << "Adding some metadata\n");
+      llvm::LLVMContext &Ctx = F->getContext();
+      MDBuilder MDB(Ctx);
+      // Annotate the callback behavior of the __kmpc_fork_call:
+      //  - The callback callee is argument number 2 (microtask).
+      //  - The first two arguments of the callback callee are unknown (-1).
+      //  - All variadic arguments to the __kmpc_fork_call are passed to the
+      //    callback callee.
+      F->addMetadata(
+          llvm::LLVMContext::MD_callback,
+          *llvm::MDNode::get(
+              Ctx, {MDB.createCallbackEncoding(2, {-1, -1},
+                                               /* VarArgsArePassed */ true)}));
+    }
+  }
+
+LLVM_DEBUG(dbgs() << "******* before outlineinfo\n");
+  OutlineInfo OI;
+LLVM_DEBUG(dbgs() << "******* outline info alloc\n");
+  OI.PostOutlineCB = [=](Function &OutlinedFn) {
+LLVM_DEBUG(dbgs() << "******* inside that weird thing\n");
+    // Add some known attributes.
+    OutlinedFn.addParamAttr(0, Attribute::NoAlias);
+    //OutlinedFn.addParamAttr(1, Attribute::NoAlias);
+    OutlinedFn.addFnAttr(Attribute::NoUnwind);
+    OutlinedFn.addFnAttr(Attribute::NoRecurse);
+
+    LLVM_DEBUG(dbgs() << "OutlinedFn: " << OutlinedFn << "\n");
+   LLVM_DEBUG(dbgs() << "OutlinedFn.arg_size(): " << OutlinedFn.arg_size()  << "\n");
+
+   
+    assert(OutlinedFn.arg_size() >= 1 &&
+           "Expected at least omp.iv as argument");
+    unsigned NumCapturedVars =
+        OutlinedFn.arg_size() - /* tid & bounded tid */ 3;
+
+    CallInst *CI = cast<CallInst>(OutlinedFn.user_back());
+    CI->getParent()->setName("omp_distribute");
+    Builder.SetInsertPoint(CI);
+
+    // Build call __kmpc_fork_call(Ident, n, microtask, var1, .., varn);
+    Value *ForkCallArgs[] = {
+        Ident, Builder.getInt32(NumCapturedVars),
+        Builder.CreateBitCast(&OutlinedFn, ParallelTaskPtr),
+        DistVal};
+
+    SmallVector<Value *, 16> RealArgs;
+    RealArgs.append(std::begin(ForkCallArgs), std::end(ForkCallArgs));
+    RealArgs.append(CI->arg_begin() + /* omp.iv */ 1, CI->arg_end());
+
+    Builder.CreateCall(RTLFn, RealArgs);
+
+    LLVM_DEBUG(dbgs() << "With fork_call placed: "
+                      << *Builder.GetInsertBlock()->getParent() << "\n");
+
+    InsertPointTy ExitIP(PRegExitBB, PRegExitBB->end());
+
+    // Initialize the local TID stack location with the argument value.
+    Builder.SetInsertPoint(PrivTID);
+    Function::arg_iterator OutlinedAI = OutlinedFn.arg_begin();
+    Builder.CreateStore(Builder.CreateLoad(Int32, OutlinedAI), PrivTIDAddr);
+LLVM_DEBUG(dbgs() << "1\n");
+    // If no "if" clause was present we do not need the call created during
+    // outlining, otherwise we reuse it in the serialized parallel region.
+    //if (!ElseTI) {
+      CI->eraseFromParent();
+    //} else {
+
+    //  // If an "if" clause was present we are now generating the serialized
+    //  // version into the "else" branch.
+    //  Builder.SetInsertPoint(ElseTI);
+
+    //  // Build calls __kmpc_serialized_parallel(&Ident, GTid);
+    //  Value *SerializedParallelCallArgs[] = {Ident, ThreadID};
+    //  Builder.CreateCall(
+    //      getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_serialized_parallel),
+    //      SerializedParallelCallArgs);
+
+    //  // OutlinedFn(&GTid, &zero, CapturedStruct);
+    //  CI->removeFromParent();
+    //  Builder.Insert(CI);
+
+    //  // __kmpc_end_serialized_parallel(&Ident, GTid);
+    //  Value *EndArgs[] = {Ident, ThreadID};
+    //  Builder.CreateCall(
+    //      getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_end_serialized_parallel),
+    //      EndArgs);
+
+    //  LLVM_DEBUG(dbgs() << "With serialized parallel region: "
+    //                    << *Builder.GetInsertBlock()->getParent() << "\n");
+    //}
+
+    for (Instruction *I : ToBeDeleted)
+      I->eraseFromParent();
+    LLVM_DEBUG(dbgs() << "delete form parent\n");
+  };
+
+  // Adjust the finalization stack, verify the adjustment, and call the
+  // finalize function a last time to finalize values between the pre-fini
+  // block and the exit block if we left the parallel "the normal way".
+  auto FiniInfo = FinalizationStack.pop_back_val();
+  (void)FiniInfo;
+  assert(FiniInfo.DK == OMPD_distribute &&
+         "Unexpected finalization stack state!");
+LLVM_DEBUG(dbgs() << "2\n");
+
+  Instruction *PRegPreFiniTI = PRegPreFiniBB->getTerminator();
+
+  InsertPointTy PreFiniIP(PRegPreFiniBB, PRegPreFiniTI->getIterator());
+  FiniCB(PreFiniIP);
+
+  OI.EntryBB = PRegEntryBB;
+  OI.ExitBB = PRegExitBB;
+
+  SmallPtrSet<BasicBlock *, 32> ParallelRegionBlockSet;
+  SmallVector<BasicBlock *, 32> Blocks;
+  OI.collectBlocks(ParallelRegionBlockSet, Blocks);
+LLVM_DEBUG(dbgs() << "3\n");
+
+  // Ensure a single exit node for the outlined region by creating one.
+  // We might have multiple incoming edges to the exit now due to finalizations,
+  // e.g., cancel calls that cause the control flow to leave the region.
+  BasicBlock *PRegOutlinedExitBB = PRegExitBB;
+  PRegExitBB = SplitBlock(PRegExitBB, &*PRegExitBB->getFirstInsertionPt());
+  PRegOutlinedExitBB->setName("omp.dis.outlined.exit");
+  Blocks.push_back(PRegOutlinedExitBB);
+
+  CodeExtractorAnalysisCache CEAC(*OuterFn);
+  CodeExtractor Extractor(Blocks, /* DominatorTree */ nullptr,
+                          /* AggregateArgs */ false,
+                          /* BlockFrequencyInfo */ nullptr,
+                          /* BranchProbabilityInfo */ nullptr,
+                          /* AssumptionCache */ nullptr,
+                          /* AllowVarArgs */ true,
+                          /* AllowAlloca */ true,
+                          /* Suffix */ ".omp_dis");
+LLVM_DEBUG(dbgs() << "4\n");
+
+  // Find inputs to, outputs from the code region.
+  BasicBlock *CommonExit = nullptr;
+  SetVector<Value *> Inputs, Outputs, SinkingCands, HoistingCands;
+  Extractor.findAllocas(CEAC, SinkingCands, HoistingCands, CommonExit);
+  Extractor.findInputsOutputs(Inputs, Outputs, SinkingCands);
+
+  LLVM_DEBUG(dbgs() << "Before privatization: " << *OuterFn << "\n");
+
+  FunctionCallee TIDRTLFn =
+      getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_global_thread_num);
+
+  auto PrivHelper = [&](Value &V) {
+    if (&V == OMPIV) { //  &V == TIDAddr || &V == ZeroAddr) {
+      OI.ExcludeArgsFromAggregate.push_back(&V);
+      return;
+    }
+
+    SetVector<Use *> Uses;
+    for (Use &U : V.uses())
+      if (auto *UserI = dyn_cast<Instruction>(U.getUser()))
+        if (ParallelRegionBlockSet.count(UserI->getParent()))
+          Uses.insert(&U);
+
+    // __kmpc_fork_call expects extra arguments as pointers. If the input
+    // already has a pointer type, everything is fine. Otherwise, store the
+    // value onto stack and load it back inside the to-be-outlined region. This
+    // will ensure only the pointer will be passed to the function.
+    // FIXME: if there are more than 15 trailing arguments, they must be
+    // additionally packed in a struct.
+    Value *Inner = &V;
+    if (!V.getType()->isPointerTy()) {
+      IRBuilder<>::InsertPointGuard Guard(Builder);
+      LLVM_DEBUG(llvm::dbgs() << "Forwarding input as pointer: " << V << "\n");
+
+      Builder.restoreIP(OuterAllocaIP);
+      Value *Ptr =
+          Builder.CreateAlloca(V.getType(), nullptr, V.getName() + ".reloaded");
+
+      // Store to stack at end of the block that currently branches to the entry
+      // block of the to-be-outlined region.
+      Builder.SetInsertPoint(InsertBB,
+                             InsertBB->getTerminator()->getIterator());
+      Builder.CreateStore(&V, Ptr);
+
+      // Load back next to allocations in the to-be-outlined region.
+      Builder.restoreIP(InnerAllocaIP);
+      Inner = Builder.CreateLoad(V.getType(), Ptr);
+    }
+
+    Value *ReplacementValue = nullptr;
+    CallInst *CI = dyn_cast<CallInst>(&V);
+    if (CI && CI->getCalledFunction() == TIDRTLFn.getCallee()) {
+      ReplacementValue = PrivTID;
+    } else {
+      Builder.restoreIP(
+          PrivCB(InnerAllocaIP, Builder.saveIP(), V, *Inner, ReplacementValue));
+      assert(ReplacementValue &&
+             "Expected copy/create callback to set replacement value!");
+      if (ReplacementValue == &V)
+        return;
+    }
+
+    for (Use *UPtr : Uses)
+      UPtr->set(ReplacementValue);
+  };
+
+  // Reset the inner alloca insertion as it will be used for loading the values
+  // wrapped into pointers before passing them into the to-be-outlined region.
+  // Configure it to insert immediately after the fake use of zero address so
+  // that they are available in the generated body and so that the
+  // OpenMP-related values (thread ID and zero address pointers) remain leading
+  // in the argument list.
+  InnerAllocaIP = IRBuilder<>::InsertPoint(
+      OMPIVUse->getParent(), OMPIVUse->getNextNode()->getIterator());
+
+  // Reset the outer alloca insertion point to the entry of the relevant block
+  // in case it was invalidated.
+  OuterAllocaIP = IRBuilder<>::InsertPoint(
+      OuterAllocaBlock, OuterAllocaBlock->getFirstInsertionPt());
+
+  for (Value *Input : Inputs) {
+    LLVM_DEBUG(dbgs() << "Captured input: " << *Input << "\n");
+    PrivHelper(*Input);
+  }
+  LLVM_DEBUG({
+    for (Value *Output : Outputs)
+      LLVM_DEBUG(dbgs() << "Captured output: " << *Output << "\n");
+  });
+  assert(Outputs.empty() &&
+         "OpenMP outlining should not produce live-out values!");
+
+  LLVM_DEBUG(dbgs() << "After  privatization: " << *OuterFn << "\n");
+  LLVM_DEBUG({
+    for (auto *BB : Blocks)
+      dbgs() << " PBR: " << BB->getName() << "\n";
+  });
+
+  // Register the outlined info.
+  addOutlineInfo(std::move(OI));
+
+  InsertPointTy AfterIP(UI->getParent(), UI->getParent()->end());
+  UI->eraseFromParent();
+
+  return AfterIP;
+
 }
 
 IRBuilder<>::InsertPoint OpenMPIRBuilder::createParallel(

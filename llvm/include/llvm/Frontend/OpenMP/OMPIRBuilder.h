@@ -181,6 +181,25 @@ public:
   InsertPointTy createCancel(const LocationDescription &Loc, Value *IfCondition,
                              omp::Directive CanceledDirective);
 
+  /// Experimental generator for all loops in offloaded region
+  ///
+  /// \param Loc The insert and source location description
+  /// \param AllocaIP The insertion points to be used for alloca instructions.
+  IRBuilder<>::InsertPoint
+  testLoopWrapper(const LocationDescription &Loc, InsertPointTy AllocaIP);
+
+
+  using EmittedClosureTy = std::pair<llvm::Function *, llvm::Value *>;
+  /// Generator for '#omp distribute'
+  IRBuilder<>::InsertPoint
+  createDistribute(const LocationDescription &Loc, InsertPointTy AllocaIP,
+                 std::function<void(InsertPointTy, InsertPointTy, BasicBlock&, Value*, EmittedClosureTy)> BodyGenCB, PrivatizeCallbackTy PrivCB,
+                 FinalizeCallbackTy FiniCB, Value *IfCondition,
+                 Value *NumThreads, omp::ProcBindKind ProcBind,
+                 bool IsCancellable, std::function<std::tuple<Value*,EmittedClosureTy>(InsertPointTy)> DistanceCB,
+                 std::function<void(InsertPointTy, llvm::Value*)> LoopVarCB);
+
+
   /// Generator for '#omp parallel'
   ///
   /// \param Loc The insert and source location description.
