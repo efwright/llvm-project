@@ -175,7 +175,7 @@ Function *OpenMPIRBuilder::getOrCreateRuntimeFunctionPtr(RuntimeFunction FnID) {
 void OpenMPIRBuilder::initialize() { initializeTypes(M); }
 
 void OpenMPIRBuilder::finalize(Function *Fn) {
-LLVM_DEBUG(dbgs() << "********* FINALIZE!!!!!\n");
+dbgs() << "********* FINALIZE!!!!!\n";
   SmallPtrSet<BasicBlock *, 32> ParallelRegionBlockSet;
   SmallVector<BasicBlock *, 32> Blocks;
   SmallVector<OutlineInfo, 16> DeferredOutlines;
@@ -202,9 +202,9 @@ LLVM_DEBUG(dbgs() << "********* FINALIZE!!!!!\n");
                             /* AllowAlloca */ true,
                             /* Suffix */ ".omp_par");
 
-    LLVM_DEBUG(dbgs() << "Before     outlining: " << *OuterFn << "\n");
-    LLVM_DEBUG(dbgs() << "Entry " << OI.EntryBB->getName()
-                      << " Exit: " << OI.ExitBB->getName() << "\n");
+    dbgs() << "Before     outlining: " << *OuterFn << "\n";
+    dbgs() << "Entry " << OI.EntryBB->getName()
+                      << " Exit: " << OI.ExitBB->getName() << "\n";
     assert(Extractor.isEligible() &&
            "Expected OpenMP outlining to be possible!");
 
@@ -213,8 +213,8 @@ LLVM_DEBUG(dbgs() << "********* FINALIZE!!!!!\n");
 
     Function *OutlinedFn = Extractor.extractCodeRegion(CEAC);
 
-    LLVM_DEBUG(dbgs() << "After      outlining: " << *OuterFn << "\n");
-    LLVM_DEBUG(dbgs() << "   Outlined function: " << *OutlinedFn << "\n");
+    dbgs() << "After      outlining: " << *OuterFn << "\n";
+    dbgs() << "   Outlined function: " << *OutlinedFn << "\n";
     assert(OutlinedFn->getReturnType()->isVoidTy() &&
            "OpenMP outlined functions should not return a value!");
 
@@ -222,7 +222,7 @@ LLVM_DEBUG(dbgs() << "********* FINALIZE!!!!!\n");
     // one with the parallel region.
     OutlinedFn->removeFromParent();
     M.getFunctionList().insertAfter(OuterFn->getIterator(), OutlinedFn);
-LLVM_DEBUG(dbgs() << "o1\n");
+dbgs() << "o1\n";
     // Remove the artificial entry introduced by the extractor right away, we
     // made our own entry block after all.
     {
@@ -247,14 +247,14 @@ LLVM_DEBUG(dbgs() << "o1\n");
 
         I.moveBefore(*OI.EntryBB, OI.EntryBB->getFirstInsertionPt());
       }
-LLVM_DEBUG(dbgs() << "o2\n");
+dbgs() << "o2\n";
 
       OI.EntryBB->moveBefore(&ArtificialEntry);
       ArtificialEntry.eraseFromParent();
     }
     assert(&OutlinedFn->getEntryBlock() == OI.EntryBB);
     assert(OutlinedFn && OutlinedFn->getNumUses() == 1);
-LLVM_DEBUG(dbgs() << "o3\n");
+dbgs() << "o3\n";
 
     // Run a user callback, e.g. to add attributes.
     if (OI.PostOutlineCB)
@@ -263,7 +263,7 @@ LLVM_DEBUG(dbgs() << "o3\n");
 
   // Remove work items that have been completed.
   OutlineInfos = std::move(DeferredOutlines);
-LLVM_DEBUG(dbgs() << "o4\n");
+dbgs() << "o4\n";
 
 }
 
@@ -628,11 +628,11 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
 
   // Change the location to the outer alloca insertion point to create and
   // initialize the allocas we pass into the parallel region.
-  Builder.restoreIP(OuterAllocaIP);
+  //Builder.restoreIP(OuterAllocaIP);
   //DistanceCB();
   //AllocaInst *TIDAddr = Builder.CreateAlloca(Int32, nullptr, "tid.addr");
   //AllocaInst *ZeroAddr = Builder.CreateAlloca(Int32, nullptr, "zero.addr");
-  AllocaInst *OMPIV = Builder.CreateAlloca(Int32, nullptr, "omp.iv");
+  //AllocaInst *OMPIV = Builder.CreateAlloca(Int32, nullptr, "omp.iv");
 
   // If there is an if condition we actually use the TIDAddr and ZeroAddr in the
   // program, otherwise we only need them for modeling purposes to get the
@@ -644,7 +644,7 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
   //} else {
     //ToBeDeleted.push_back(TIDAddr);
     //ToBeDeleted.push_back(ZeroAddr);
-    ToBeDeleted.push_back(OMPIV);
+//    ToBeDeleted.push_back(OMPIV);
   //}
 
   LLVM_DEBUG(dbgs() << "Before distance func: " << *OuterFn << "\n");
@@ -652,14 +652,33 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
   //Builder.SetInsertPoint(PRegEntryBB);
   std::tuple<Value*, EmittedClosureTy> DistanceOutput = DistanceCB(OuterAllocaIP);
   Value * DistVal = std::get<0>(DistanceOutput);
+
+  bool is32Bit = DistVal->getType()->isIntegerTy(32);
+
+  if(is32Bit) {
+    dbgs() << "DIST VAL IS 32 BIT\n";
+    DistVal = Builder.CreateIntCast(DistVal, Int64, false);
+    dbgs() << *DistVal << "\n";
+  }
   EmittedClosureTy LoopVarClosure = std::get<1>(DistanceOutput);
 
+  dbgs() << "******************************************\n" << "DistVal type " << *(DistVal->getType()) << "\n";
+  dbgs() << *Int32 << "\n";
+
+  Builder.restoreIP(OuterAllocaIP);
+  AllocaInst *OMPIV = Builder.CreateAlloca(Int64, nullptr, "omp.iv");
+  //AllocaInst *OMPIV = Builder.CreateAlloca(DistVal->getType(), nullptr, "omp.iv");
+  ToBeDeleted.push_back(OMPIV);
+ 
   LLVM_DEBUG(dbgs() << "After distance func: " << *OuterFn << "\n");
   LLVM_DEBUG(dbgs() << "DistVal: " << *DistVal << "\n");
   LLVM_DEBUG(dbgs() << "omp.iv: " << *OMPIV << "\n");
   LLVM_DEBUG(dbgs() << "LoopVarFunc: " << *LoopVarClosure.first << "\n");
   LLVM_DEBUG(dbgs() << "LoopVar: " << *LoopVarClosure.second << "\n");
   LLVM_DEBUG(dbgs() << "omp.iv type: " << OMPIV->getType() << "\n");
+
+ 
+
   // Create an artificial insertion point that will also ensure the blocks we
   // are about to split are not degenerated.
   auto *UI = new UnreachableInst(Builder.getContext(), InsertBB);
@@ -701,8 +720,8 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
   InsertPointTy InnerAllocaIP = Builder.saveIP();
 
   AllocaInst *PrivTIDAddr =
-      Builder.CreateAlloca(Int32, nullptr, "tid.addr.local");
-  Instruction *PrivTID = Builder.CreateLoad(Int32, PrivTIDAddr, "tid");
+      Builder.CreateAlloca(Int64, nullptr, "tid.addr.local");
+  Instruction *PrivTID = Builder.CreateLoad(Int64, PrivTIDAddr, "tid");
 
   //DistanceCB();
 
@@ -711,9 +730,19 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
   //Instruction *ZeroAddrUse =
   //    Builder.CreateLoad(Int32, ZeroAddr, "zero.addr.use");
   //ToBeDeleted.push_back(ZeroAddrUse);
-  Instruction *OMPIVUse =
-      Builder.CreateLoad(Int32, OMPIV, "omp.iv.use");
-  ToBeDeleted.push_back(OMPIVUse);
+
+  Instruction *OMPIVUse;
+  if(is32Bit) {
+    //Value * o = OMPIV;
+    Value *OMPIV32Bit = Builder.CreateIntCast(OMPIV, Int32, false);
+    OMPIVUse = Builder.CreateLoad(Int32, OMPIV32Bit, "omp.iv.use");
+  } else {
+    OMPIVUse = Builder.CreateLoad(Int64, OMPIV, "omp.iv.use");
+  }
+
+  //Instruction *OMPIVUse =
+  //      Builder.CreateLoad(DistVal->getType(), OMPIV, "omp.iv.use");
+  //ToBeDeleted.push_back(OMPIVUse);
 
   //LLVM_DEBUG(dbgs() << "Before distance func: " << *OuterFn << "\n");
   //InsertPointTy DistanceGenIP(PRegEntryBB, PRegEntryBB->begin());
@@ -745,14 +774,38 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
   LLVM_DEBUG(dbgs() << "Before body codegen: " << *OuterFn << "\n");
   assert(BodyGenCB && "Expected body generation callback!");
   InsertPointTy CodeGenIP(PRegBodyBB, PRegBodyBB->begin());
-  BodyGenCB(InnerAllocaIP, CodeGenIP, *PRegPreFiniBB, OMPIV, LoopVarClosure);
 
-  LLVM_DEBUG(dbgs() << "After  body codegen: " << *OuterFn << "\n");
+/*Instruction *OMPIVUse =
+      Builder.CreateLoad(Int32, OMPIV, "omp.iv.use");
+
+      llvm::BasicBlock *CodeGenIPBB = CodeGenIP.getBlock();
+      if (llvm::Instruction *CodeGenIPBBTI = CodeGenIPBB->getTerminator())
+        CodeGenIPBBTI->eraseFromParent();
+      Builder.SetInsertPoint(CodeGenIPBB);
+
+      const DeclRefExpr *LoopVarRef = CL->getLoopVarRef();
+      LValue LCVal = EmitLValue(LoopVarRef);
+      Address LoopVarAddress = LCVal.getAddress(*this);
+
+      printf("LoopVarRef:\n");
+      LoopVarRef->dump();
+      llvm::dbgs() << "IndVar is " << *IndVar << "\n";
+      Address OMPIVAddr = GetAddrOfLocalVar(IndVar);
+      llvm::Value * OMPIVL = Builder.CreateLoad(OMPIVAddr, "omp.iv.loaded");
+      llvm::dbgs() << "omp.iv.load = " << *OMPIVL << "\n";
+      emitCapturedStmtCall(*this, LoopVarClosure,
+                          {LoopVarAddress.getPointer(), IndVar});
+*/
+
+  dbgs() << "omp.iv.use = " << *OMPIVUse << "\n";  
+  BodyGenCB(InnerAllocaIP, CodeGenIP, *PRegPreFiniBB, OMPIVUse, LoopVarClosure);
+
+  dbgs() << "After  body codegen: " << *OuterFn << "\n";
 
   FunctionCallee RTLFn = getOrCreateRuntimeFunctionPtr(OMPRTL___test_distribute);  //OMPRTL___kmpc_fork_call);
   if (auto *F = dyn_cast<llvm::Function>(RTLFn.getCallee())) {
     if (!F->hasMetadata(llvm::LLVMContext::MD_callback)) {
-      LLVM_DEBUG(dbgs() << "Adding some metadata\n");
+      dbgs() << "Adding some metadata\n";
       llvm::LLVMContext &Ctx = F->getContext();
       MDBuilder MDB(Ctx);
       // Annotate the callback behavior of the __kmpc_fork_call:
@@ -768,19 +821,19 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
     }
   }
 
-LLVM_DEBUG(dbgs() << "******* before outlineinfo\n");
+  dbgs() << "******* before outlineinfo\n";
   OutlineInfo OI;
-LLVM_DEBUG(dbgs() << "******* outline info alloc\n");
+  dbgs() << "******* outline info alloc\n";
   OI.PostOutlineCB = [=](Function &OutlinedFn) {
-LLVM_DEBUG(dbgs() << "******* inside that weird thing\n");
+  dbgs() << "******* inside that weird thing\n";
     // Add some known attributes.
     OutlinedFn.addParamAttr(0, Attribute::NoAlias);
     //OutlinedFn.addParamAttr(1, Attribute::NoAlias);
     OutlinedFn.addFnAttr(Attribute::NoUnwind);
     OutlinedFn.addFnAttr(Attribute::NoRecurse);
 
-    LLVM_DEBUG(dbgs() << "OutlinedFn: " << OutlinedFn << "\n");
-   LLVM_DEBUG(dbgs() << "OutlinedFn.arg_size(): " << OutlinedFn.arg_size()  << "\n");
+    dbgs() << "OutlinedFn: " << OutlinedFn << "\n";
+    dbgs() << "OutlinedFn.arg_size(): " << OutlinedFn.arg_size()  << "\n";
 
    
     assert(OutlinedFn.arg_size() >= 1 &&
@@ -802,18 +855,22 @@ LLVM_DEBUG(dbgs() << "******* inside that weird thing\n");
     RealArgs.append(std::begin(ForkCallArgs), std::end(ForkCallArgs));
     RealArgs.append(CI->arg_begin() + /* omp.iv */ 1, CI->arg_end());
 
+    dbgs() << "Is this the problem?\n";
     Builder.CreateCall(RTLFn, RealArgs);
+    dbgs() << "Do you see this?\n";
 
-    LLVM_DEBUG(dbgs() << "With fork_call placed: "
-                      << *Builder.GetInsertBlock()->getParent() << "\n");
+    dbgs() << "With fork_call placed: "
+                      << *Builder.GetInsertBlock()->getParent() << "\n";
 
     InsertPointTy ExitIP(PRegExitBB, PRegExitBB->end());
 
     // Initialize the local TID stack location with the argument value.
     Builder.SetInsertPoint(PrivTID);
     Function::arg_iterator OutlinedAI = OutlinedFn.arg_begin();
-    Builder.CreateStore(Builder.CreateLoad(Int32, OutlinedAI), PrivTIDAddr);
-LLVM_DEBUG(dbgs() << "1\n");
+    dbgs() << *OutlinedAI << "\n";
+    dbgs() << "Next possible problem?\n";
+    Builder.CreateStore(Builder.CreateLoad(Int64, OutlinedAI), PrivTIDAddr);
+    dbgs() << "1\n";
     // If no "if" clause was present we do not need the call created during
     // outlining, otherwise we reuse it in the serialized parallel region.
     //if (!ElseTI) {
@@ -846,7 +903,7 @@ LLVM_DEBUG(dbgs() << "1\n");
 
     for (Instruction *I : ToBeDeleted)
       I->eraseFromParent();
-    LLVM_DEBUG(dbgs() << "delete form parent\n");
+    dbgs() << "delete form parent\n";
   };
 
   // Adjust the finalization stack, verify the adjustment, and call the
@@ -856,7 +913,7 @@ LLVM_DEBUG(dbgs() << "1\n");
   (void)FiniInfo;
   assert(FiniInfo.DK == OMPD_distribute &&
          "Unexpected finalization stack state!");
-LLVM_DEBUG(dbgs() << "2\n");
+  dbgs() << "2\n";
 
   Instruction *PRegPreFiniTI = PRegPreFiniBB->getTerminator();
 
@@ -869,7 +926,7 @@ LLVM_DEBUG(dbgs() << "2\n");
   SmallPtrSet<BasicBlock *, 32> ParallelRegionBlockSet;
   SmallVector<BasicBlock *, 32> Blocks;
   OI.collectBlocks(ParallelRegionBlockSet, Blocks);
-LLVM_DEBUG(dbgs() << "3\n");
+  dbgs() << "3\n";
 
   // Ensure a single exit node for the outlined region by creating one.
   // We might have multiple incoming edges to the exit now due to finalizations,
@@ -888,7 +945,7 @@ LLVM_DEBUG(dbgs() << "3\n");
                           /* AllowVarArgs */ true,
                           /* AllowAlloca */ true,
                           /* Suffix */ ".omp_dis");
-LLVM_DEBUG(dbgs() << "4\n");
+  dbgs() << "4\n";
 
   // Find inputs to, outputs from the code region.
   BasicBlock *CommonExit = nullptr;
@@ -896,7 +953,7 @@ LLVM_DEBUG(dbgs() << "4\n");
   Extractor.findAllocas(CEAC, SinkingCands, HoistingCands, CommonExit);
   Extractor.findInputsOutputs(Inputs, Outputs, SinkingCands);
 
-  LLVM_DEBUG(dbgs() << "Before privatization: " << *OuterFn << "\n");
+  dbgs() << "Before privatization: " << *OuterFn << "\n";
 
   FunctionCallee TIDRTLFn =
       getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_global_thread_num);
@@ -971,21 +1028,18 @@ LLVM_DEBUG(dbgs() << "4\n");
       OuterAllocaBlock, OuterAllocaBlock->getFirstInsertionPt());
 
   for (Value *Input : Inputs) {
-    LLVM_DEBUG(dbgs() << "Captured input: " << *Input << "\n");
+    dbgs() << "Captured input: " << *Input << "\n";
     PrivHelper(*Input);
   }
-  LLVM_DEBUG({
     for (Value *Output : Outputs)
-      LLVM_DEBUG(dbgs() << "Captured output: " << *Output << "\n");
-  });
+      dbgs() << "Captured output: " << *Output << "\n";
+
   assert(Outputs.empty() &&
          "OpenMP outlining should not produce live-out values!");
 
-  LLVM_DEBUG(dbgs() << "After  privatization: " << *OuterFn << "\n");
-  LLVM_DEBUG({
+  dbgs() << "After  privatization: " << *OuterFn << "\n";
     for (auto *BB : Blocks)
       dbgs() << " PBR: " << BB->getName() << "\n";
-  });
 
   // Register the outlined info.
   addOutlineInfo(std::move(OI));

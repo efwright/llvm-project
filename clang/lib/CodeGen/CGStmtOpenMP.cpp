@@ -1952,6 +1952,14 @@ emitCapturedStmtCall(CodeGenFunction &ParentCGF, EmittedClosureTy Cap,
   llvm::append_range(EffectiveArgs, Args);
   EffectiveArgs.push_back(Cap.second);
 
+  llvm::dbgs() << "emitCapturedStmtCall\n";
+  llvm::dbgs() << "Closure.first = " << *Cap.first << "\n";
+  llvm::dbgs() << "Closure.second = " << *Cap.second << "\n";
+  llvm::dbgs() << "Passed args:\n";
+  for(llvm::Value *arg : EffectiveArgs) {
+    llvm::dbgs() << *arg << "\n";
+  }
+
   return ParentCGF.Builder.CreateCall(Cap.first, EffectiveArgs);
 }
 
@@ -5484,10 +5492,20 @@ void CodeGenFunction::EmitOMPDistributeDirective(
 
   S.dump();
 
+  printf("CS:\n");
+  S.getAssociatedStmt()->dump();
+
   auto *CS = dyn_cast<CapturedStmt>(S.getAssociatedStmt());
+
+  printf("CL:\n");
+  CS->getCapturedStmt()->dump();
+
   auto *CL = dyn_cast<OMPCanonicalLoop>(CS->getCapturedStmt());
 
-  if (CGM.getLangOpts().OpenMPIRBuilder) {
+  printf("Gonna try this canonicalloop\n");
+  CL->dump();
+
+  //if (CGM.getLangOpts().OpenMPIRBuilder) {
     llvm::OpenMPIRBuilder &OMPBuilder = CGM.getOpenMPRuntime().getOMPBuilder();
     // Check if we have any if clause associated with the directive.
     llvm::Value *IfCond = nullptr;
@@ -5501,12 +5519,22 @@ void CodeGenFunction::EmitOMPDistributeDirective(
     //LexicalScope ForScope(*this, CL->getSourceRange());
 
     auto DistanceCB = [this, CL](InsertPointTy OuterAlloca) -> std::tuple<llvm::Value*,EmittedClosureTy> {
+      printf("DistanceCB\n");
+
       Builder.restoreIP(OuterAlloca);
+      printf("restoreIP\n");
+
+      CL->dump();
+
       const auto *For = dyn_cast<ForStmt>(CL->getLoopStmt());
+      printf("dyncast\n");
       if (const Stmt *InitStmt = For->getInit()) {
+        printf("inside if\n");
         InitStmt->dump();
+        printf("Before the emit initstmt\n");
         EmitStmt(InitStmt);
       }
+      printf("outside if\n");
 
       // Emit closure for later use. By-value captures will be captured here.
       const CapturedStmt *DistanceFunc = CL->getDistanceFunc();
@@ -5581,6 +5609,8 @@ void CodeGenFunction::EmitOMPDistributeDirective(
     auto BodyGenCB = [loopBody,
                       this, CL](InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
                             llvm::BasicBlock &ContinuationBB, llvm::Value *IndVar, EmittedClosureTy LoopVarClosure) {
+      printf("BodyGen\n");
+
       OMPBuilderCBHelpers::OutlinedRegionBodyRAII ORB(*this, AllocaIP,
                                                       ContinuationBB);
 
@@ -5595,7 +5625,14 @@ void CodeGenFunction::EmitOMPDistributeDirective(
 
       printf("LoopVarRef:\n");
       LoopVarRef->dump();
+      llvm::dbgs() << "IndVar is " << *IndVar << "\n";
+      //Address OMPIVAddr = GetAddrOfLocalVar(IndVar);
+      //llvm::Value * OMPIVL = Builder.CreateLoad(OMPIVAddr, "omp.iv.loaded");
 
+      //llvm::Instruction *OMPIVL =
+      //  Builder.CreateLoad(Int32Ty, IndVar, "omp.iv.loaded");
+
+      //llvm::dbgs() << "omp.iv.load = " << *OMPIVL << "\n";
       emitCapturedStmtCall(*this, LoopVarClosure,
                           {LoopVarAddress.getPointer(), IndVar});
 
@@ -5607,19 +5644,20 @@ void CodeGenFunction::EmitOMPDistributeDirective(
     CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(*this, &CGSI);
     llvm::OpenMPIRBuilder::InsertPointTy AllocaIP(
         AllocaInsertPt->getParent(), AllocaInsertPt->getIterator());
+    printf("I've made it to createDistribute\n");
     Builder.restoreIP(
         OMPBuilder.createDistribute(Builder, AllocaIP, BodyGenCB, PrivCB, FiniCB,
                                   IfCond, NumThreads, ProcBind, false, DistanceCB, LoopVarCB));
     return;
 
-  }
+  //}
 
 
-  auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
+ /* auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
     CGF.EmitOMPDistributeLoop(S, emitOMPLoopBodyWithStopPoint, S.getInc());
   };
   OMPLexicalScope Scope(*this, S, OMPD_unknown);
-  CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_distribute, CodeGen);
+  CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_distribute, CodeGen);*/
 }
 
 
