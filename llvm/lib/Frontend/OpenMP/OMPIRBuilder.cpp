@@ -731,14 +731,21 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
   //    Builder.CreateLoad(Int32, ZeroAddr, "zero.addr.use");
   //ToBeDeleted.push_back(ZeroAddrUse);
 
+  dbgs() << "Before\n";
   Instruction *OMPIVUse;
+  Value *OMPIVCasted;
   if(is32Bit) {
     //Value * o = OMPIV;
-    Value *OMPIV32Bit = Builder.CreateIntCast(OMPIV, Int32, false);
-    OMPIVUse = Builder.CreateLoad(Int32, OMPIV32Bit, "omp.iv.use");
+    //dbgs() << "I have to assume the trunc is breaking\n";
+    //Value *OMPIV32Bit = Builder.CreateTrunc(OMPIV, Int32);
+    //dbgs() << "Yes?\n";
+    OMPIVUse = Builder.CreateLoad(Int64, OMPIV, "omp.iv.use");
+    OMPIVCasted = Builder.CreateTrunc(OMPIVUse, Int32, "omp.iv.casted");
   } else {
     OMPIVUse = Builder.CreateLoad(Int64, OMPIV, "omp.iv.use");
+    OMPIVCasted = OMPIVUse;
   }
+  dbgs() << "After\n";
 
   //Instruction *OMPIVUse =
   //      Builder.CreateLoad(DistVal->getType(), OMPIV, "omp.iv.use");
@@ -798,8 +805,8 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
 */
 
   dbgs() << "omp.iv.use = " << *OMPIVUse << "\n";  
-  BodyGenCB(InnerAllocaIP, CodeGenIP, *PRegPreFiniBB, OMPIVUse, LoopVarClosure);
-
+  //BodyGenCB(InnerAllocaIP, CodeGenIP, *PRegPreFiniBB, OMPIVUse, LoopVarClosure);
+  BodyGenCB(InnerAllocaIP, CodeGenIP, *PRegPreFiniBB, OMPIVCasted, LoopVarClosure);
   dbgs() << "After  body codegen: " << *OuterFn << "\n";
 
   FunctionCallee RTLFn = getOrCreateRuntimeFunctionPtr(OMPRTL___test_distribute);  //OMPRTL___kmpc_fork_call);
