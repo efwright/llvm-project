@@ -2896,7 +2896,7 @@ StmtResult Parser::ParseOpenMPDeclarativeOrExecutableDirective(
 
         //if (AssociatedStmt.isUsable() && isOpenMPLoopDirective(DKind) &&
         //    getLangOpts().OpenMPIRBuilder)
-        if (AssociatedStmt.isUsable() && isOpenMPLoopDirective(DKind)
+        if (AssociatedStmt.isUsable() && isOpenMPLoopDirective(DKind))
           AssociatedStmt = Actions.ActOnOpenMPLoopnest(AssociatedStmt.get());
       }
       AssociatedStmt = Actions.ActOnOpenMPRegionEnd(AssociatedStmt, Clauses);
