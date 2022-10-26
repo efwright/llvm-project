@@ -647,10 +647,14 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
 //    ToBeDeleted.push_back(OMPIV);
   //}
 
-  LLVM_DEBUG(dbgs() << "Before distance func: " << *OuterFn << "\n");
+  dbgs() << "Before distance func: " << *OuterFn << "\n";
+
+  //llvm::OpenMPIRBuilder::InsertPointTy AllocaIP(
+  //      AllocaInsertPt->getParent(), AllocaInsertPt->getIterator());
+  InsertPointTy DistanceIP(OuterAllocaBlock, OuterAllocaBlock->end());
   //InsertPointTy DistanceGenIP(PRegEntryBB, PRegEntryBB->begin());
   //Builder.SetInsertPoint(PRegEntryBB);
-  std::tuple<Value*, EmittedClosureTy> DistanceOutput = DistanceCB(OuterAllocaIP);
+  std::tuple<Value*, EmittedClosureTy> DistanceOutput = DistanceCB(DistanceIP); //OuterAllocaIP);
   Value * DistVal = std::get<0>(DistanceOutput);
 
   bool is32Bit = DistVal->getType()->isIntegerTy(32);
@@ -666,10 +670,11 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
   dbgs() << *Int32 << "\n";
 
   Builder.restoreIP(OuterAllocaIP);
-  AllocaInst *OMPIV = Builder.CreateAlloca(Int64, nullptr, "omp.iv");
+  AllocaInst *OMPIV = Builder.CreateAlloca(Int64, nullptr, "omp.iv.tmp");
+  LoadInst *OMPIVUse = Builder.CreateLoad(Int64, OMPIV, "omp.iv");
+
   //AllocaInst *OMPIV = Builder.CreateAlloca(DistVal->getType(), nullptr, "omp.iv");
-  ToBeDeleted.push_back(OMPIV);
- 
+
   LLVM_DEBUG(dbgs() << "After distance func: " << *OuterFn << "\n");
   LLVM_DEBUG(dbgs() << "DistVal: " << *DistVal << "\n");
   LLVM_DEBUG(dbgs() << "omp.iv: " << *OMPIV << "\n");
@@ -732,19 +737,26 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
   //ToBeDeleted.push_back(ZeroAddrUse);
 
   dbgs() << "Before\n";
-  Instruction *OMPIVUse;
-  Value *OMPIVCasted;
+  //Instruction *OMPIVUse;
+  //Value *OMPIVTest = dyn_cast<Value>(OMPIVUse);
+  Instruction *OMPIVCasted;
   if(is32Bit) {
     //Value * o = OMPIV;
     //dbgs() << "I have to assume the trunc is breaking\n";
     //Value *OMPIV32Bit = Builder.CreateTrunc(OMPIV, Int32);
     //dbgs() << "Yes?\n";
-    OMPIVUse = Builder.CreateLoad(Int64, OMPIV, "omp.iv.use");
-    OMPIVCasted = Builder.CreateTrunc(OMPIVUse, Int32, "omp.iv.casted");
+    //OMPIVUse = Builder.CreateLoad(Int64, OMPIV, "omp.iv.use");
+    OMPIVCasted = dyn_cast<Instruction>(Builder.CreateTrunc(OMPIVUse, Int32, "omp.iv.casted"));
   } else {
-    OMPIVUse = Builder.CreateLoad(Int64, OMPIV, "omp.iv.use");
-    OMPIVCasted = OMPIVUse;
+    //OMPIVUse = Builder.CreateLoad(Int64, OMPIV, "omp.iv.use");
+    //OMPIVCasted = OMPIVUse;
+    OMPIVCasted = dyn_cast<Instruction>(Builder.CreateAdd(OMPIVUse, Builder.getInt64(0), "omp.iv.tobedeleted"));
+    ToBeDeleted.push_back(OMPIVCasted);
   }
+
+  ToBeDeleted.push_back(OMPIVUse); 
+  ToBeDeleted.push_back(OMPIV);
+
   dbgs() << "After\n";
 
   //Instruction *OMPIVUse =
@@ -809,8 +821,9 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
   BodyGenCB(InnerAllocaIP, CodeGenIP, *PRegPreFiniBB, OMPIVCasted, LoopVarClosure);
   dbgs() << "After  body codegen: " << *OuterFn << "\n";
 
-  FunctionCallee RTLFn = getOrCreateRuntimeFunctionPtr(OMPRTL___test_distribute);  //OMPRTL___kmpc_fork_call);
+  FunctionCallee RTLFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_test_distribute);  //OMPRTL___kmpc_fork_call);
   if (auto *F = dyn_cast<llvm::Function>(RTLFn.getCallee())) {
+    dbgs() << "RTLFn\n" << *F << "\n";
     if (!F->hasMetadata(llvm::LLVMContext::MD_callback)) {
       dbgs() << "Adding some metadata\n";
       llvm::LLVMContext &Ctx = F->getContext();
@@ -824,7 +837,7 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
           llvm::LLVMContext::MD_callback,
           *llvm::MDNode::get(
               Ctx, {MDB.createCallbackEncoding(2, {-1, -1},
-                                               /* VarArgsArePassed */ true)}));
+                                               /* VarArgsArePassed */ false)}));
     }
   }
 
@@ -834,7 +847,7 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
   OI.PostOutlineCB = [=](Function &OutlinedFn) {
   dbgs() << "******* inside that weird thing\n";
     // Add some known attributes.
-    OutlinedFn.addParamAttr(0, Attribute::NoAlias);
+    //OutlinedFn.addParamAttr(0, Attribute::NoAlias);
     //OutlinedFn.addParamAttr(1, Attribute::NoAlias);
     OutlinedFn.addFnAttr(Attribute::NoUnwind);
     OutlinedFn.addFnAttr(Attribute::NoRecurse);
@@ -852,17 +865,27 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
     CI->getParent()->setName("omp_distribute");
     Builder.SetInsertPoint(CI);
 
+    Value * StructArg = CI->getArgOperand(1); // 0 should be omp.iv
+    dbgs() << "StructArg = " << *StructArg << "\n";
+
     // Build call __kmpc_fork_call(Ident, n, microtask, var1, .., varn);
     Value *ForkCallArgs[] = {
         Ident, Builder.getInt32(NumCapturedVars),
-        Builder.CreateBitCast(&OutlinedFn, ParallelTaskPtr),
-        DistVal};
+        //Builder.CreateBitCast(&OutlinedFn, ParallelTaskPtr),
+        Builder.CreateBitCast(&OutlinedFn, LoopTaskPtr),
+        DistVal,
+        Builder.CreateCast(Instruction::BitCast, StructArg, Int8PtrPtr)};
 
     SmallVector<Value *, 16> RealArgs;
     RealArgs.append(std::begin(ForkCallArgs), std::end(ForkCallArgs));
-    RealArgs.append(CI->arg_begin() + /* omp.iv */ 1, CI->arg_end());
+    //RealArgs.append(CI->arg_begin() + /* omp.iv */ 1, CI->arg_end());
+
+    //Builder.CreateCast(Instruction::BitCast, StructArg, Int8PtrPtr);
 
     dbgs() << "Is this the problem?\n";
+    for(Value * val : RealArgs) {
+      dbgs() << *val << " : " << *(val->getType()) << "\n";
+    }
     Builder.CreateCall(RTLFn, RealArgs);
     dbgs() << "Do you see this?\n";
 
@@ -876,7 +899,7 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
     Function::arg_iterator OutlinedAI = OutlinedFn.arg_begin();
     dbgs() << *OutlinedAI << "\n";
     dbgs() << "Next possible problem?\n";
-    Builder.CreateStore(Builder.CreateLoad(Int64, OutlinedAI), PrivTIDAddr);
+    Builder.CreateStore(OutlinedAI, PrivTIDAddr);
     dbgs() << "1\n";
     // If no "if" clause was present we do not need the call created during
     // outlining, otherwise we reuse it in the serialized parallel region.
@@ -945,11 +968,13 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
 
   CodeExtractorAnalysisCache CEAC(*OuterFn);
   CodeExtractor Extractor(Blocks, /* DominatorTree */ nullptr,
-                          /* AggregateArgs */ false,
+                          /* AggregateArgs */ true, //false,
+                          ///* AggregateArgs */ true,
                           /* BlockFrequencyInfo */ nullptr,
                           /* BranchProbabilityInfo */ nullptr,
                           /* AssumptionCache */ nullptr,
-                          /* AllowVarArgs */ true,
+                          /* AllowVarArgs */ false, //true,
+                          ///* AllowVarArgs */ false,
                           /* AllowAlloca */ true,
                           /* Suffix */ ".omp_dis");
   dbgs() << "4\n";
@@ -966,7 +991,7 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
       getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_global_thread_num);
 
   auto PrivHelper = [&](Value &V) {
-    if (&V == OMPIV) { //  &V == TIDAddr || &V == ZeroAddr) {
+    if (&V == OMPIVUse) { //  &V == TIDAddr || &V == ZeroAddr) {
       OI.ExcludeArgsFromAggregate.push_back(&V);
       return;
     }
@@ -1027,7 +1052,7 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createDistribute(
   // OpenMP-related values (thread ID and zero address pointers) remain leading
   // in the argument list.
   InnerAllocaIP = IRBuilder<>::InsertPoint(
-      OMPIVUse->getParent(), OMPIVUse->getNextNode()->getIterator());
+      OMPIVCasted->getParent(), OMPIVCasted->getNextNode()->getIterator());
 
   // Reset the outer alloca insertion point to the entry of the relevant block
   // in case it was invalidated.
