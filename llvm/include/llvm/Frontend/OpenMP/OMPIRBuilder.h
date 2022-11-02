@@ -192,7 +192,7 @@ public:
   using EmittedClosureTy = std::pair<llvm::Function *, llvm::Value *>;
   /// Generator for '#omp distribute'
   IRBuilder<>::InsertPoint
-  createDistribute(const LocationDescription &Loc, InsertPointTy AllocaIP,
+  createWorkshareLoop(const LocationDescription &Loc, InsertPointTy AllocaIP,
                  std::function<void(InsertPointTy, InsertPointTy, BasicBlock&, Value*, EmittedClosureTy)> BodyGenCB, PrivatizeCallbackTy PrivCB,
                  FinalizeCallbackTy FiniCB, Value *IfCondition,
                  Value *NumThreads, omp::ProcBindKind ProcBind,
