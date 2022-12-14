@@ -21,6 +21,17 @@ namespace _OMP {
 
 namespace state {
 
+constexpr uint8_t SIMD_Terminate = 0;
+constexpr uint8_t SIMD_EndFor = 1;
+constexpr uint8_t SIMD_Loop = 2;
+
+uint8_t getSimdState(uint32_t SimdGroup);
+void setSimdState(uint32_t SimdGroup, uint8_t Mode);
+void getSimdWorkload(uint32_t SimdGroup, SimdRegionFnTy *WorkFn,
+               uint64_t *SimdTripCount);
+void setSimdWorkload(uint32_t SimdGroup, SimdRegionFnTy WorkFn,
+               uint64_t SimdTripCount);
+
 inline constexpr uint32_t SharedScratchpadSize = SHARED_SCRATCHPAD_SIZE;
 
 /// Initialize the state machinery. Must be called by all threads.
@@ -37,6 +48,10 @@ enum ValueKind {
   VK_RunSchedChunk,
   VK_ParallelRegionFn,
   VK_ParallelTeamSize,
+
+  VK_SimdRegionFn,
+  VK_SimdArgs,
+  VK_SimdTripCount,
 };
 
 /// TODO
@@ -152,6 +167,12 @@ inline state::Value<uint32_t, state::VK_ParallelTeamSize> ParallelTeamSize;
 /// TODO
 inline state::PtrValue<ParallelRegionFnTy, state::VK_ParallelRegionFn>
     ParallelRegionFn;
+
+inline state::PtrValue<SimdRegionFnTy, state::VK_SimdRegionFn> SimdRegionFn;
+inline state::PtrValue<void*, state::VK_SimdArgs> SimdArgs;
+inline state::Value<uint32_t, state::VK_SimdTripCount> SimdTripCount;
+
+
 
 void runAndCheckState(void(Func(void)));
 

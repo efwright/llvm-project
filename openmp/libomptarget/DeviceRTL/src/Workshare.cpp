@@ -45,6 +45,10 @@ struct DynamicScheduleTracker {
 
 #pragma omp declare target
 
+void __kmpc_kernel_simd(SimdRegionFnTy *WorkFn) {
+  *WorkFn = state::SimdRegionFn;
+}
+
 // TODO: This variable is a hack inherited from the old runtime.
 static uint64_t SHARED(Cnt);
 
@@ -117,8 +121,10 @@ template <typename T, typename ST> struct omptarget_nvptx_LoopSupport {
   static void for_static_init(int32_t, int32_t schedtype,
                               int32_t *plastiter, T *plower, T *pupper,
                               ST *pstride, ST chunk, bool IsSPMDExecutionMode) {
-    int32_t gtid = omp_get_thread_num();
-    int numberOfActiveOMPThreads = omp_get_num_threads();
+    uint32_t gtid = mapping::getSimdGroup();  //omp_get_thread_num();
+    uint32_t numberOfActiveOMPThreads = mapping::getNumSimdGroups(); //omp_get_num_threads();
+
+    printf("for_static_init gtid=%i, num=%i\n", gtid, numberOfActiveOMPThreads);
 
     // All warps that are in excess of the maximum requested, do
     // not execute the loop
@@ -466,6 +472,136 @@ static void popDST() {
 }
 
 extern "C" {
+/*
+bool __kmpc_kernel_simd(SimdRegionFnTy *WorkFn, uint64_t *TripCount, SimdArgumentsTy *Args) {
+  uint32_t GroupId = mapping::getWarpId() % mapping::getGroupSize();
+  bool ThreadIsActive = GroupId < state::SimdLen;
+  return ThreadIsActive;
+}
+
+void __kmpc_simd_workshare_loop(void(uint64_t,void**)* WorkFn, uint64_t TripCount, void **Args) {
+  uint64_t omp_iv = (uint64_t)mapping::getThreadIdInWarp();
+  uint64_t warpSize = (uint64_t)mapping::getWarpSize();
+  while(omp_iv < TripCount) {
+    WorkFn(omp_iv, Args);
+    omp_iv += warpSize;
+  }
+  return;
+}
+
+void __kmpc_simd_51(IdentTy *ident, void(uint64_t,void**) WorkFn, uint64_t TripCount, void **Args) {
+  synchronize::warp(mapping::activemask());
+  __kmpc_simd_workshare_loop(WorkFn, TripCount, Args);
+  synchronize::warp(mapping::activemask());
+}
+*/
+
+void __kmpc_simd_51(IdentTy *ident, void (*WorkFn)(int64_t, void**), uint64_t TripCount, void **Args, int32_t NumArgs)
+{
+  printf("simd_51\n");
+
+  if(OMP_PARALLEL_SPMD) {
+
+    if(mapping::getThreadIdInBlock() == 0) {
+      printf("    Running simd loop in SPMD mode %p(%p) for %lu iterations\n", WorkFn, Args, TripCount);
+    }
+
+    synchronize::threads();
+
+    uint64_t omp_iv = mapping::getSimdGroupId();
+    while(omp_iv < TripCount) {
+      WorkFn(omp_iv, Args);
+      omp_iv += mapping::getSimdGroupSize();
+    }
+
+    synchronize::threads();
+
+    if(mapping::getThreadIdInBlock() == 0) {
+      printf("    Simd loop is finished\n");
+    }
+
+    return;
+  }
+
+  printf("      Simd main %i starting simd_51 %p(%p) for %lu iterations\n", mapping::getThreadIdInBlock(), WorkFn, Args, TripCount);
+
+  void **SharedArgs;
+  __kmpc_simd_begin_sharing_variables(&SharedArgs, NumArgs);
+
+  printf("        Simd main %i sharing %i variables at %p\n", mapping::getThreadIdInBlock(), NumArgs, SharedArgs);
+
+  for(int i = 0; i < NumArgs; i++)
+    SharedArgs[i] = Args[i];
+
+  uint32_t SimdGroup = mapping::getSimdGroup();
+  state::setSimdState(SimdGroup, state::SIMD_Loop);
+  state::setSimdWorkload(SimdGroup, (void*)WorkFn, TripCount);
+
+  printf("        Simd main %i signaling workers\n", mapping::getThreadIdInBlock());
+  synchronize::warp(mapping::simdmask()); 
+
+  __kmpc_simd_workshare(ident, (SimdRegionFnTy)WorkFn, SharedArgs, TripCount);
+
+  synchronize::warp(mapping::simdmask());
+
+  __kmpc_simd_end_sharing_variables();
+
+}
+
+/// State machine for SIMD workers when inside a parallel region.
+void __kmpc_simd_state_machine(IdentTy *ident) {
+  FunctionTracingRAII();
+  printf("    Simd worker %i entered simd state machine\n", mapping::getThreadIdInBlock());
+  uint32_t TId = mapping::getThreadIdInBlock();
+  do {
+    SimdRegionFnTy WorkFn;
+    void **SimdArgs;
+    uint64_t TripCount;
+    uint32_t SimdGroup = mapping::getSimdGroup();
+
+    synchronize::warp(mapping::simdmask());
+
+    uint8_t Mode = state::getSimdState(SimdGroup);
+    switch(Mode) {
+      case state::SIMD_Loop:
+        state::getSimdWorkload(SimdGroup, &WorkFn, &TripCount);
+        __kmpc_simd_get_shared_variables(&SimdArgs);
+        __kmpc_simd_workshare(ident, WorkFn, SimdArgs, TripCount);
+        synchronize::warp(mapping::simdmask());
+        break;
+      case state::SIMD_Terminate:
+        printf("    Simd worker %i receieved simd termination signal\n", mapping::getThreadIdInBlock());
+        return;
+      case state::SIMD_EndFor:
+        printf("    Simd worker %u receieved end for signal\n", mapping::getThreadIdInBlock());
+        __kmpc_barrier(ident, TId);
+        printf("Past the barrier\n");
+        break;
+      default:
+        printf("WRONG STATE\n");
+    }
+
+    //synchronize::warp(mapping::simdmask());
+  } while (true);
+
+}
+
+void __kmpc_simd_workshare(IdentTy *ident, SimdRegionFnTy WorkFn, void **Args, uint64_t TripCount)
+{
+  ASSERT(WorkFn);
+
+  printf("      Simd worker %i running %p(%p) for %lu iterations\n", mapping::getThreadIdInBlock(), WorkFn, Args, TripCount);
+
+  synchronize::warp(mapping::simdmask());
+
+  uint64_t omp_iv = (uint64_t)mapping::getSimdGroupId();
+  while(omp_iv < TripCount) {
+    ((void (*)(uint64_t, void**))WorkFn)(omp_iv, Args);
+    omp_iv += mapping::getSimdGroupSize();
+  }
+}
+
+
 
 void __kmpc_test_distribute(IdentTy *ident, void (*fn)(int64_t, void**), int64_t tripcount, void **args)
 {
@@ -576,6 +712,7 @@ void __kmpc_for_static_init_4(IdentTy *loc, int32_t global_tid,
                               int32_t *plower, int32_t *pupper,
                               int32_t *pstride, int32_t incr, int32_t chunk) {
   FunctionTracingRAII();
+  printf("__kmpc_for_static_init\n");
   omptarget_nvptx_LoopSupport<int32_t, int32_t>::for_static_init(
       global_tid, schedtype, plastiter, plower, pupper, pstride, chunk,
       mapping::isSPMDMode());
@@ -657,6 +794,12 @@ void __kmpc_distribute_static_init_8u(IdentTy *loc, int32_t global_tid,
 
 void __kmpc_for_static_fini(IdentTy *loc, int32_t global_tid) {
   FunctionTracingRAII();
+  printf("for_static_fini\n");
+  if(!OMP_PARALLEL_SPMD) {
+    printf("signaling the workers end of fini\n");
+    state::setSimdState(mapping::getSimdGroup(), state::SIMD_EndFor);
+    synchronize::warp(mapping::simdmask());
+  }
 }
 
 void __kmpc_distribute_static_fini(IdentTy *loc, int32_t global_tid) {

@@ -21,11 +21,12 @@ using namespace _OMP;
 
 #pragma omp declare target
 
-static void inititializeRuntime(bool IsSPMD) {
+//static void inititializeRuntime(bool IsSPMD) {
+static void inititializeRuntime(uint8_t Mode) {
   // Order is important here.
-  synchronize::init(IsSPMD);
-  mapping::init(IsSPMD);
-  state::init(IsSPMD);
+  synchronize::init(Mode); //IsSPMD);
+  mapping::init(Mode); //IsSPMD);
+  state::init(Mode); //IsSPMD);
 }
 
 /// Simple generic state machine for worker threads.
@@ -59,7 +60,62 @@ static void genericStateMachine(IdentTy *Ident) {
   } while (true);
 }
 
+/// State machine for SIMD mains and SIMD workers while in a teams region.
+static void teamsStateMachine(IdentTy *ident) {
+  FunctionTracingRAII();
+
+  printf("Thread %i entered state machine (G=%i, GId=%i)\n", mapping::getThreadIdInBlock(), mapping::getSimdGroup(), mapping::getSimdGroupId());
+
+  do {
+    ParallelRegionFnTy ParallelFn = 0;
+
+    synchronize::threads();
+
+    bool IsActive = __kmpc_kernel_parallel(&ParallelFn); // TODO IsActive may no longer be accurate
+
+    if (!ParallelFn) {
+      // Termination signal, exit target region.
+      printf("  Receieved target terminate signal\n");
+      return;
+    }
+
+    if(mapping::getThreadIdInBlock() == 0)
+      printf("  Parallel region encountered\n");
+
+    // If parallel SPMD is enabled all threads can safely run the parallel region.
+    if(OMP_PARALLEL_SPMD) {
+      printf("  %u Running parallel region in SPMD mode\n", mapping::getThreadIdInBlock());
+      uint32_t TId = mapping::getThreadIdInBlock();
+      ((void (*)(uint32_t, uint32_t))ParallelFn)(0, TId);
+
+    // If running in generic mode, SIMD workers must enter the next stage of the state machine.
+    } else {
+      if(mapping::getThreadIdInBlock() == 0)
+        printf("  Running parallel region in generic mode\n");
+      if(mapping::isSimdGroupLeader()) {
+        printf("    Simd main %i is running the parallel region\n", mapping::getThreadIdInBlock());
+        uint32_t TId = mapping::getThreadIdInBlock();
+        ((void (*)(uint32_t, uint32_t))ParallelFn)(0, TId);
+
+        // Send termination signal to SIMD workers, end of parallel region.
+        printf("    Simd main %i is sending termination signal to workers\n", mapping::getThreadIdInBlock());
+        //state::SimdRegionFn = (void*)nullptr;
+        state::setSimdState(mapping::getSimdGroup(), state::SIMD_Terminate);
+        synchronize::warp(mapping::simdmask());
+      } else {
+        __kmpc_simd_state_machine(ident);
+      }
+    }
+
+    // This resets any thread states that were created.
+    __kmpc_kernel_end_parallel();
+
+    synchronize::threads();
+  } while (true);
+}
+
 extern "C" {
+
 
 /// Initialization
 ///
@@ -68,6 +124,7 @@ extern "C" {
 int32_t __kmpc_target_init(IdentTy *Ident, int8_t Mode,
                            bool UseGenericStateMachine, bool) {
   FunctionTracingRAII();
+
   const bool IsSPMD = Mode & OMP_TGT_EXEC_MODE_SPMD;
   if (IsSPMD) {
     inititializeRuntime(/* IsSPMD */ true);
@@ -78,13 +135,22 @@ int32_t __kmpc_target_init(IdentTy *Ident, int8_t Mode,
     // code and workers will run into a barrier right away.
   }
 
+  if(IsSPMD) {
+    if(mapping::getThreadIdInBlock() == 0)
+      printf("Target region is SPMD mode\n");
+  } else {
+    if(mapping::isInitialThreadInLevel0(IsSPMD))
+      printf("Target region is generic mode\n");
+  }
+
   if (IsSPMD) {
     state::assumeInitialState(IsSPMD);
     return -1;
   }
 
-  if (mapping::isInitialThreadInLevel0(IsSPMD))
+  if (mapping::isInitialThreadInLevel0(IsSPMD)) {
     return -1;
+  }
 
   // Enter the generic state machine if enabled and if this thread can possibly
   // be an active worker thread.
@@ -100,8 +166,10 @@ int32_t __kmpc_target_init(IdentTy *Ident, int8_t Mode,
   // doing any work.  mapping::getBlockSize() does not include any of the main
   // thread's warp, so none of its threads can ever be active worker threads.
   if (UseGenericStateMachine &&
-      mapping::getThreadIdInBlock() < mapping::getBlockSize(IsSPMD))
-    genericStateMachine(Ident);
+      mapping::getThreadIdInBlock() < mapping::getBlockSize(IsSPMD)) {
+    //genericStateMachine(Ident);
+    teamsStateMachine(Ident);
+  }
 
   return mapping::getThreadIdInBlock();
 }

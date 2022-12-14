@@ -2626,8 +2626,7 @@ static bool isSupportedByOpenMPIRBuilder(const OMPExecutableDirective &S) {
 
 void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
 
-  printf("fsimd\n");
-
+  // Only use the new code when building for GPU
 if(!CGM.getLangOpts().OpenMPIsDevice) {
 
   bool UseOMPIRBuilder =
@@ -2678,159 +2677,165 @@ if(!CGM.getLangOpts().OpenMPIsDevice) {
 
 } // end not gpu
 
-  S.dump();
-
-  printf("CS:\n");
-  S.getAssociatedStmt()->dump();
-
+  // Get the OMPCanonicalLoop
   auto *CS = dyn_cast<CapturedStmt>(S.getAssociatedStmt());
-
-  printf("CL:\n");
-  CS->getCapturedStmt()->dump();
-
   auto *CL = dyn_cast<OMPCanonicalLoop>(CS->getCapturedStmt());
 
-  printf("Gonna try this canonicalloop\n");
-  CL->dump();
+  CGCapturedStmtInfo CGSI(*CS, CR_OpenMP);
+  CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(*this, &CGSI);
+  llvm::OpenMPIRBuilder::InsertPointTy AllocaIP(
+      AllocaInsertPt->getParent(), AllocaInsertPt->getIterator());
 
-    llvm::OpenMPIRBuilder &OMPBuilder = CGM.getOpenMPRuntime().getOMPBuilder();
-    llvm::Value *IfCond = nullptr;
-    llvm::Value *NumThreads = nullptr;
-    ProcBindKind ProcBind = OMP_PROC_BIND_default;
+  // Generate the loop variable and then grab its llvm::Value
+  // Both the trip count calculation and virtual iteration conversion
+  // needs the loop variable
+  const auto *For = dyn_cast<ForStmt>(CL->getLoopStmt());
+  const Stmt *InitStmt = For->getInit();
+  EmitStmt(InitStmt);
+  const DeclRefExpr *LoopVarRef = CL->getLoopVarRef();
+  LValue LCVal = EmitLValue(LoopVarRef);
+  Address LoopVarAddress = LCVal.getAddress(*this);
+  // Loop Variable - will need later
+  llvm::AllocaInst *LoopVar = dyn_cast<llvm::AllocaInst>(LoopVarAddress.getPointer());
 
-    using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
+  llvm::OpenMPIRBuilder &OMPBuilder = CGM.getOpenMPRuntime().getOMPBuilder();
+  llvm::Value *IfCond = nullptr; // Artifact
+  llvm::Value *NumThreads = nullptr; // Artifact
+  ProcBindKind ProcBind = OMP_PROC_BIND_default; // Artifact
 
-    auto DistanceCB = [this, CL](InsertPointTy OuterAlloca) -> std::tuple<llvm::Value*,EmittedClosureTy> {
-      printf("DistanceCB\n");
+  using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
 
-      Builder.restoreIP(OuterAlloca);
-      printf("restoreIP\n");
+  // Callback to generate the loop trip count
+  // Should return the llvm::Value that contains the trip count
+  // Also returns an EmittedClosureTy but this is an artifact and will be removed eventually
+  auto DistanceCB = [this, CL, LoopVar](InsertPointTy OuterAlloca) -> std::tuple<llvm::Value*,EmittedClosureTy> {
+    Builder.restoreIP(OuterAlloca);
 
-      CL->dump();
+    const CapturedStmt *DistanceFunc = CL->getDistanceFunc();
+    EmittedClosureTy DistanceClosure = emitCapturedStmtFunc(*this, DistanceFunc);
 
-      const auto *For = dyn_cast<ForStmt>(CL->getLoopStmt());
-      printf("dyncast\n");
-      if (const Stmt *InitStmt = For->getInit()) {
-        printf("inside if\n");
-        InitStmt->dump();
-        printf("Before the emit initstmt\n");
-        EmitStmt(InitStmt);
-      }
-      printf("outside if\n");
+    EmittedClosureTy LoopVarClosure(nullptr, nullptr);
 
-      // Emit closure for later use. By-value captures will be captured here.
-      const CapturedStmt *DistanceFunc = CL->getDistanceFunc();
-      printf("distancefunc\n");
-      DistanceFunc->dump();
-      EmittedClosureTy DistanceClosure = emitCapturedStmtFunc(*this, DistanceFunc);
+    QualType LogicalTy = DistanceFunc->getCapturedDecl()
+                         ->getParam(0)
+                         ->getType()
+                         .getNonReferenceType();
+    Address CountAddr = CreateMemTemp(LogicalTy, ".count.addr");
+    emitCapturedStmtCall(*this, DistanceClosure, {CountAddr.getPointer()});
+    llvm::Value *DistVal = Builder.CreateLoad(CountAddr, ".count");
 
-      const CapturedStmt *LoopVarFunc = CL->getLoopVarFunc();
-      printf("loopvarfunc\n");
-      LoopVarFunc->dump();
-      EmittedClosureTy LoopVarClosure = emitCapturedStmtFunc(*this, LoopVarFunc);
+    return std::make_tuple(DistVal, LoopVarClosure);
+  };
+
+  // The cleanup callback that finalizes all variabels at the given location,
+  // thus calls destructors etc.
+  auto FiniCB = [this](InsertPointTy IP) {
+    OMPBuilderCBHelpers::FinalizeOMPRegion(*this, IP);
+  };
+
+  // Privatization callback that performs appropriate action for
+  // shared/private/firstprivate/lastprivate/copyin/... variables.
+  //
+  // TODO: This isn't really being used right now.
+  auto PrivCB = [](InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
+                   llvm::Value &, llvm::Value &Val, llvm::Value *&ReplVal) {
+    // The next line is appropriate only for variables (Val) with the
+    // data-sharing attribute "shared".
+    ReplVal = &Val;
+
+    return CodeGenIP;
+  };
+
+  auto LoopVarCB = [this, CL](InsertPointTy CodeGenIP, llvm::Value *OMPIV) -> llvm::Value* {
+/*    Builder.restoreIP(CodeGenIP);
+    // Create a placeholder for the LoopVar
+    llvm::AllocaInst *PlaceHolder =
+      Builder.CreateAlloca(LoopVar->getAllocatedType(), LoopVar->getAddressSpace(),
+                             LoopVar->getArraySize(), "loopvar.placeholder");
 
 
+    llvm::BasicBlock *CodeGenIPBB = CodeGenIP.getBlock();
+    Builder.SetInsertPoint(CodeGenIPBB->getTerminator());
 
-      QualType LogicalTy = DistanceFunc->getCapturedDecl()
-                           ->getParam(0)
-                           ->getType()
-                           .getNonReferenceType();
-      Address CountAddr = CreateMemTemp(LogicalTy, ".count.addr");
-      emitCapturedStmtCall(*this, DistanceClosure, {CountAddr.getPointer()});
-      llvm::Value *DistVal = Builder.CreateLoad(CountAddr, ".count");
-      return std::make_tuple(DistVal, LoopVarClosure);
-    };
+    const CapturedStmt *LoopVarFunc = CL->getLoopVarFunc();
+    EmittedClosureTy LoopVarClosure = emitCapturedStmtFunc(*this, LoopVarFunc);
+    // Generate the LoopVar call saving its output to the placeholder
+    emitCapturedStmtCall(*this, LoopVarClosure,
+                          {PlaceHolder, OMPIV});
 
-    auto LoopVarCB = [this, CL](InsertPointTy InnerAlloca, llvm::Value *IndVar) {
+    // Replace the LoopVar the DistanceCB and LoopVarCB use because we want to use
+    // a local alloca for the body
+    // This is only needed because DistanceCB and LoopVarCB needs us to generate
+    // the LoopVar for them to work. But we want to actual LoopVar to be local
+    // to the simd loop outlined function.
+    llvm::Instruction * NewLoopVar = LoopVar->clone();
+    NewLoopVar->insertBefore(LoopVar);
+    LoopVar->replaceAllUsesWith(NewLoopVar);
+    LoopVar->removeFromParent();
 
-      //Builder.restoreIP(InnerAlloca);
+    // Now that the LoopVar in DistanceCB and LoopVarCB are replaced with a new value,
+    // we need to replace our placeholder with the real local loop variable.
+    LoopVar->insertBefore(PlaceHolder);
+    PlaceHolder->replaceAllUsesWith(LoopVar);
+    PlaceHolder->eraseFromParent();
+*/
+    // This return is now an artifact.
+    return nullptr;
+  };
 
-      //const auto *For = dyn_cast<ForStmt>(CL->getLoopStmt());
-      //if (const Stmt *InitStmt = For->getInit()) {
-      //  InitStmt->dump();
-      //  EmitStmt(InitStmt);
-      //}
+  // Generate the body of the loop. Virtual and LoopVarClosure are now artifacts and will be removed eventually.
+  const Stmt *loopBody = S.getBody();
+  auto BodyGenCB = [loopBody, this, CL, LoopVar]
+                   (InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
+                    llvm::BasicBlock &ContinuationBB, llvm::Value *Virtual, EmittedClosureTy _LoopVarClosure) {
+    OMPBuilderCBHelpers::OutlinedRegionBodyRAII ORB(*this, AllocaIP,
+                                                    ContinuationBB);
 
-      //const CapturedStmt *LoopVarFunc = CL->getLoopVarFunc();
-      //printf("loopvarfunc\n");
-      //LoopVarFunc->dump();
-      //EmittedClosureTy LoopVarClosure = emitCapturedStmtFunc(*this, LoopVarFunc);
+    llvm::BasicBlock *CodeGenIPBB = CodeGenIP.getBlock();
+    if (llvm::Instruction *CodeGenIPBBTI = CodeGenIPBB->getTerminator())
+      CodeGenIPBBTI->eraseFromParent();
+    Builder.SetInsertPoint(CodeGenIPBB);
 
-      //const DeclRefExpr *LoopVarRef = CL->getLoopVarRef();
-      //LValue LCVal = EmitLValue(LoopVarRef);
-      //Address LoopVarAddress = LCVal.getAddress(*this);
-      //emitCapturedStmtCall(*this, LoopVarClosure,
-      //                    {LoopVarAddress.getPointer(), IndVar});
+    llvm::AllocaInst *PlaceHolder =
+      Builder.CreateAlloca(LoopVar->getAllocatedType(), LoopVar->getAddressSpace(),
+                             LoopVar->getArraySize(), "loopvar.placeholder");
 
-    };
+    //llvm::BasicBlock *CodeGenIPBB = CodeGenIP.getBlock();
+    //Builder.SetInsertPoint(CodeGenIPBB->getTerminator());
 
-    // The cleanup callback that finalizes all variabels at the given location,
-    // thus calls destructors etc.
-    auto FiniCB = [this](InsertPointTy IP) {
-      OMPBuilderCBHelpers::FinalizeOMPRegion(*this, IP);
-    };
+    const CapturedStmt *LoopVarFunc = CL->getLoopVarFunc();
+    EmittedClosureTy LoopVarClosure = emitCapturedStmtFunc(*this, LoopVarFunc);
+    // Generate the LoopVar call saving its output to the placeholder
+    emitCapturedStmtCall(*this, LoopVarClosure,
+                          {PlaceHolder, Virtual});
 
-    // Privatization callback that performs appropriate action for
-    // shared/private/firstprivate/lastprivate/copyin/... variables.
-    //
-    // TODO: This defaults to shared right now.
-    auto PrivCB = [](InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
-                     llvm::Value &, llvm::Value &Val, llvm::Value *&ReplVal) {
-      // The next line is appropriate only for variables (Val) with the
-      // data-sharing attribute "shared".
-      ReplVal = &Val;
+    // Replace the LoopVar the DistanceCB and LoopVarCB use because we want to use
+    // a local alloca for the body
+    // This is only needed because DistanceCB and LoopVarCB needs us to generate
+    // the LoopVar for them to work. But we want to actual LoopVar to be local
+    // to the simd loop outlined function.
+    llvm::Instruction * NewLoopVar = LoopVar->clone();
+    NewLoopVar->insertBefore(LoopVar);
+    LoopVar->replaceAllUsesWith(NewLoopVar);
+    LoopVar->removeFromParent();
 
-      return CodeGenIP;
-    };
+    // Now that the LoopVar in DistanceCB and LoopVarCB are replaced with a new value,
+    // we need to replace our placeholder with the real local loop variable.
+    LoopVar->insertBefore(PlaceHolder);
+    PlaceHolder->replaceAllUsesWith(LoopVar);
+    PlaceHolder->eraseFromParent();
 
-    //const CapturedStmt *CS = S.getCapturedStmt(OMPD_parallel);
-    //const Stmt *ParallelRegionBodyStmt = CS->getCapturedStmt();
+    // Now generate the body. The LoopVar should be a local alloca
+    OMPBuilderCBHelpers::EmitOMPRegionBody(*this, loopBody,
+                                           CodeGenIP, ContinuationBB);
+  };
 
-    const Stmt *loopBody = S.getBody();
-
-    auto BodyGenCB = [loopBody,
-                      this, CL](InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
-                            llvm::BasicBlock &ContinuationBB, llvm::Value *IndVar, EmittedClosureTy LoopVarClosure) {
-      printf("BodyGen\n");
-
-      OMPBuilderCBHelpers::OutlinedRegionBodyRAII ORB(*this, AllocaIP,
-                                                      ContinuationBB);
-
-      llvm::BasicBlock *CodeGenIPBB = CodeGenIP.getBlock();
-      if (llvm::Instruction *CodeGenIPBBTI = CodeGenIPBB->getTerminator())
-        CodeGenIPBBTI->eraseFromParent();
-      Builder.SetInsertPoint(CodeGenIPBB);
-
-      const DeclRefExpr *LoopVarRef = CL->getLoopVarRef();
-      LValue LCVal = EmitLValue(LoopVarRef);
-      Address LoopVarAddress = LCVal.getAddress(*this);
-
-      printf("LoopVarRef:\n");
-      LoopVarRef->dump();
-      llvm::dbgs() << "IndVar is " << *IndVar << "\n";
-      //Address OMPIVAddr = GetAddrOfLocalVar(IndVar);
-      //llvm::Value * OMPIVL = Builder.CreateLoad(OMPIVAddr, "omp.iv.loaded");
-
-      //llvm::Instruction *OMPIVL =
-      //  Builder.CreateLoad(Int32Ty, IndVar, "omp.iv.loaded");
-
-      //llvm::dbgs() << "omp.iv.load = " << *OMPIVL << "\n";
-      emitCapturedStmtCall(*this, LoopVarClosure,
-                          {LoopVarAddress.getPointer(), IndVar});
-
-      OMPBuilderCBHelpers::EmitOMPRegionBody(*this, loopBody,
-                                             CodeGenIP, ContinuationBB);
-    };
-
-    CGCapturedStmtInfo CGSI(*CS, CR_OpenMP);
-    CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(*this, &CGSI);
-    llvm::OpenMPIRBuilder::InsertPointTy AllocaIP(
-        AllocaInsertPt->getParent(), AllocaInsertPt->getIterator());
-    printf("I've made it to createDistribute\n");
-    Builder.restoreIP(
-        OMPBuilder.createWorkshareLoop(Builder, AllocaIP, BodyGenCB, PrivCB, FiniCB,
-                                  IfCond, NumThreads, ProcBind, false, DistanceCB, LoopVarCB));
-    return;
+  // Call into the OMPIRBuilder.
+  // A lot of these arguments are artifacts from createParallel that will be removed.
+  Builder.restoreIP(
+      OMPBuilder.createWorkshareLoop(Builder, AllocaIP, BodyGenCB, PrivCB, FiniCB,
+                                IfCond, NumThreads, ProcBind, false, DistanceCB, LoopVarCB));
+  return;
 
 }
 
@@ -5652,188 +5657,11 @@ void CodeGenFunction::EmitOMPDistributeLoop(const OMPLoopDirective &S,
 
 void CodeGenFunction::EmitOMPDistributeDirective(
     const OMPDistributeDirective &S) {
-
-
-//if (!CGM.getLangOpts().OpenMPIsDevice) {
-if (true) {
   auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
     CGF.EmitOMPDistributeLoop(S, emitOMPLoopBodyWithStopPoint, S.getInc());
   };
   OMPLexicalScope Scope(*this, S, OMPD_unknown);
   CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_distribute, CodeGen);
-  return;
-}
-
-  printf("EmitOMPDistributeDirective\n");
-
-  S.dump();
-
-  printf("CS:\n");
-  S.getAssociatedStmt()->dump();
-
-  auto *CS = dyn_cast<CapturedStmt>(S.getAssociatedStmt());
-
-  printf("CL:\n");
-  CS->getCapturedStmt()->dump();
-
-  auto *CL = dyn_cast<OMPCanonicalLoop>(CS->getCapturedStmt());
-
-  printf("Gonna try this canonicalloop\n");
-  CL->dump();
-
-  //if (CGM.getLangOpts().OpenMPIRBuilder) {
-    llvm::OpenMPIRBuilder &OMPBuilder = CGM.getOpenMPRuntime().getOMPBuilder();
-    // Check if we have any if clause associated with the directive.
-    llvm::Value *IfCond = nullptr;
-
-    llvm::Value *NumThreads = nullptr;
-
-    ProcBindKind ProcBind = OMP_PROC_BIND_default;
-
-    using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
-
-    //LexicalScope ForScope(*this, CL->getSourceRange());
-
-    auto DistanceCB = [this, CL](InsertPointTy OuterAlloca) -> std::tuple<llvm::Value*,EmittedClosureTy> {
-      printf("DistanceCB\n");
-
-      Builder.restoreIP(OuterAlloca);
-      printf("restoreIP\n");
-
-      CL->dump();
-
-      const auto *For = dyn_cast<ForStmt>(CL->getLoopStmt());
-      printf("dyncast\n");
-      if (const Stmt *InitStmt = For->getInit()) {
-        printf("inside if\n");
-        InitStmt->dump();
-        printf("Before the emit initstmt\n");
-        EmitStmt(InitStmt);
-      }
-      printf("outside if\n");
-
-      // Emit closure for later use. By-value captures will be captured here.
-      const CapturedStmt *DistanceFunc = CL->getDistanceFunc();
-      printf("distancefunc\n");
-      DistanceFunc->dump();
-      EmittedClosureTy DistanceClosure = emitCapturedStmtFunc(*this, DistanceFunc);
-
-      const CapturedStmt *LoopVarFunc = CL->getLoopVarFunc();
-      printf("loopvarfunc\n");
-      LoopVarFunc->dump();
-      EmittedClosureTy LoopVarClosure = emitCapturedStmtFunc(*this, LoopVarFunc);
-
-
-
-      QualType LogicalTy = DistanceFunc->getCapturedDecl()
-                           ->getParam(0)
-                           ->getType()
-                           .getNonReferenceType();
-      Address CountAddr = CreateMemTemp(LogicalTy, ".count.addr");
-      emitCapturedStmtCall(*this, DistanceClosure, {CountAddr.getPointer()});
-      llvm::Value *DistVal = Builder.CreateLoad(CountAddr, ".count");
-      return std::make_tuple(DistVal, LoopVarClosure);
-    };
-
-    auto LoopVarCB = [this, CL](InsertPointTy InnerAlloca, llvm::Value *IndVar) {
-
-      //Builder.restoreIP(InnerAlloca);
-
-      //const auto *For = dyn_cast<ForStmt>(CL->getLoopStmt());
-      //if (const Stmt *InitStmt = For->getInit()) {
-      //  InitStmt->dump();
-      //  EmitStmt(InitStmt);
-      //}
-
-      //const CapturedStmt *LoopVarFunc = CL->getLoopVarFunc();
-      //printf("loopvarfunc\n");
-      //LoopVarFunc->dump();
-      //EmittedClosureTy LoopVarClosure = emitCapturedStmtFunc(*this, LoopVarFunc);
-
-      //const DeclRefExpr *LoopVarRef = CL->getLoopVarRef();
-      //LValue LCVal = EmitLValue(LoopVarRef);
-      //Address LoopVarAddress = LCVal.getAddress(*this);
-      //emitCapturedStmtCall(*this, LoopVarClosure,
-      //                    {LoopVarAddress.getPointer(), IndVar});
-
-    };
-
-    // The cleanup callback that finalizes all variabels at the given location,
-    // thus calls destructors etc.
-    auto FiniCB = [this](InsertPointTy IP) {
-      OMPBuilderCBHelpers::FinalizeOMPRegion(*this, IP);
-    };
-
-    // Privatization callback that performs appropriate action for
-    // shared/private/firstprivate/lastprivate/copyin/... variables.
-    //
-    // TODO: This defaults to shared right now.
-    auto PrivCB = [](InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
-                     llvm::Value &, llvm::Value &Val, llvm::Value *&ReplVal) {
-      // The next line is appropriate only for variables (Val) with the
-      // data-sharing attribute "shared".
-      ReplVal = &Val;
-
-      return CodeGenIP;
-    };
-
-    //const CapturedStmt *CS = S.getCapturedStmt(OMPD_parallel);
-    //const Stmt *ParallelRegionBodyStmt = CS->getCapturedStmt();
-
-    const Stmt *loopBody = S.getBody();
-
-    auto BodyGenCB = [loopBody,
-                      this, CL](InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
-                            llvm::BasicBlock &ContinuationBB, llvm::Value *IndVar, EmittedClosureTy LoopVarClosure) {
-      printf("BodyGen\n");
-
-      OMPBuilderCBHelpers::OutlinedRegionBodyRAII ORB(*this, AllocaIP,
-                                                      ContinuationBB);
-
-      llvm::BasicBlock *CodeGenIPBB = CodeGenIP.getBlock();
-      if (llvm::Instruction *CodeGenIPBBTI = CodeGenIPBB->getTerminator())
-        CodeGenIPBBTI->eraseFromParent();
-      Builder.SetInsertPoint(CodeGenIPBB);
-
-      const DeclRefExpr *LoopVarRef = CL->getLoopVarRef();
-      LValue LCVal = EmitLValue(LoopVarRef);
-      Address LoopVarAddress = LCVal.getAddress(*this);
-
-      printf("LoopVarRef:\n");
-      LoopVarRef->dump();
-      llvm::dbgs() << "IndVar is " << *IndVar << "\n";
-      //Address OMPIVAddr = GetAddrOfLocalVar(IndVar);
-      //llvm::Value * OMPIVL = Builder.CreateLoad(OMPIVAddr, "omp.iv.loaded");
-
-      //llvm::Instruction *OMPIVL =
-      //  Builder.CreateLoad(Int32Ty, IndVar, "omp.iv.loaded");
-
-      //llvm::dbgs() << "omp.iv.load = " << *OMPIVL << "\n";
-      emitCapturedStmtCall(*this, LoopVarClosure,
-                          {LoopVarAddress.getPointer(), IndVar});
-
-      OMPBuilderCBHelpers::EmitOMPRegionBody(*this, loopBody,
-                                             CodeGenIP, ContinuationBB);
-    };
-
-    CGCapturedStmtInfo CGSI(*CS, CR_OpenMP);
-    CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(*this, &CGSI);
-    llvm::OpenMPIRBuilder::InsertPointTy AllocaIP(
-        AllocaInsertPt->getParent(), AllocaInsertPt->getIterator());
-    printf("I've made it to createDistribute\n");
-    Builder.restoreIP(
-        OMPBuilder.createWorkshareLoop(Builder, AllocaIP, BodyGenCB, PrivCB, FiniCB,
-                                  IfCond, NumThreads, ProcBind, false, DistanceCB, LoopVarCB));
-    return;
-
-  //}
-
-
- /* auto &&CodeGen = [&S](CodeGenFunction &CGF, PrePostActionTy &) {
-    CGF.EmitOMPDistributeLoop(S, emitOMPLoopBodyWithStopPoint, S.getInc());
-  };
-  OMPLexicalScope Scope(*this, S, OMPD_unknown);
-  CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_distribute, CodeGen);*/
 }
 
 

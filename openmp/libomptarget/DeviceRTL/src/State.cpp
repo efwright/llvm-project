@@ -180,6 +180,8 @@ void memory::freeGlobal(void *Ptr, const char *Reason) { free(Ptr); }
 
 ///}
 
+
+
 namespace {
 
 struct ICVStateTy {
@@ -231,9 +233,15 @@ struct TeamStateTy {
 
   uint32_t ParallelTeamSize;
   ParallelRegionFnTy ParallelRegionFnVar;
+
+  uint8_t SimdStatesVar[OMP_MAX_NUM_THREADS / OMP_SIMD_LENGTH];
+  SimdRegionFnTy SimdRegionFnVar[OMP_MAX_NUM_THREADS / OMP_SIMD_LENGTH];
+  uint64_t SimdTripCountVar[OMP_MAX_NUM_THREADS / OMP_SIMD_LENGTH];
+
 };
 
 TeamStateTy SHARED(TeamState);
+
 
 void TeamStateTy::init(bool IsSPMD) {
   ICVState.NThreadsVar = mapping::getBlockSize(IsSPMD);
@@ -354,6 +362,8 @@ uint32_t &state::lookup32(ValueKind Kind, bool IsReadonly, IdentTy *Ident) {
     return lookupForModify32Impl(&ICVStateTy::RunSchedChunkVar, Ident);
   case state::VK_ParallelTeamSize:
     return TeamState.ParallelTeamSize;
+//  case state::VK_SimdTripCount:
+//    return TeamState.SimdTripCountVar;
   default:
     break;
   }
@@ -364,6 +374,10 @@ void *&state::lookupPtr(ValueKind Kind, bool IsReadonly) {
   switch (Kind) {
   case state::VK_ParallelRegionFn:
     return TeamState.ParallelRegionFnVar;
+//  case state::VK_SimdRegionFn:
+//    return TeamState.SimdRegionFnVar;
+//  case state::VK_SimdArgs:
+//    return TeamState.SimdArgumentsVar;
   default:
     break;
   }
@@ -535,7 +549,8 @@ void *llvm_omp_get_dynamic_shared() { return __kmpc_get_dynamic_shared(); }
 /// Allocate storage in shared memory to communicate arguments from the main
 /// thread to the workers in generic mode. If we exceed
 /// NUM_SHARED_VARIABLES_IN_SHARED_MEM we will malloc space for communication.
-constexpr uint64_t NUM_SHARED_VARIABLES_IN_SHARED_MEM = 64;
+constexpr uint64_t NUM_SHARED_VARIABLES_IN_SHARED_MEM = 256;
+uint32_t SHARED(SharedVariableOffset);
 
 [[clang::loader_uninitialized]] static void
     *SharedMemVariableSharingSpace[NUM_SHARED_VARIABLES_IN_SHARED_MEM];
@@ -545,10 +560,12 @@ constexpr uint64_t NUM_SHARED_VARIABLES_IN_SHARED_MEM = 64;
 #pragma omp allocate(SharedMemVariableSharingSpacePtr)                         \
     allocator(omp_pteam_mem_alloc)
 
+
 void __kmpc_begin_sharing_variables(void ***GlobalArgs, uint64_t nArgs) {
   FunctionTracingRAII();
-  if (nArgs <= NUM_SHARED_VARIABLES_IN_SHARED_MEM) {
+  if (nArgs <= NUM_SHARED_VARIABLES_IN_SHARED_MEM - mapping::getNumSimdGroups()) {
     SharedMemVariableSharingSpacePtr = &SharedMemVariableSharingSpace[0];
+    SharedVariableOffset = nArgs;
   } else {
     SharedMemVariableSharingSpacePtr = (void **)memory::allocGlobal(
         nArgs * sizeof(void *), "new extended args");
@@ -568,5 +585,70 @@ void __kmpc_get_shared_variables(void ***GlobalArgs) {
   FunctionTracingRAII();
   *GlobalArgs = SharedMemVariableSharingSpacePtr;
 }
+
+
+void __kmpc_simd_begin_sharing_variables(void ***GlobalArgs, int32_t nArgs) {
+  FunctionTracingRAII();
+  uint32_t Group = mapping::getSimdGroup();
+  uint32_t NumGroups = mapping::getNumSimdGroups();
+  uint32_t FreeSpace = NUM_SHARED_VARIABLES_IN_SHARED_MEM - SharedVariableOffset;
+  uint32_t SpacePerGroup = FreeSpace / NumGroups;
+  ASSERT(SpacePerGroup >= 1);
+  uint32_t PtrOffset = SharedVariableOffset + (Group*SpacePerGroup);
+  if(nArgs <= SpacePerGroup-1) {
+    SharedMemVariableSharingSpace[PtrOffset] = (void*)(&SharedMemVariableSharingSpace[PtrOffset+1]);
+  } else {
+    SharedMemVariableSharingSpace[PtrOffset] = (void *)memory::allocGlobal(
+        nArgs * sizeof(void *), "new simd extended args");
+    ASSERT(SharedMemVariableSharingSpace[PtrOffset] != nullptr &&
+           "Nullptr returned by malloc!");
+  }
+  *GlobalArgs = (void**)SharedMemVariableSharingSpace[PtrOffset];
+}
+
+void __kmpc_simd_end_sharing_variables() {
+  FunctionTracingRAII();
+  uint32_t Group = mapping::getSimdGroup();
+  uint32_t NumGroups = mapping::getNumSimdGroups();
+  uint32_t FreeSpace = NUM_SHARED_VARIABLES_IN_SHARED_MEM - SharedVariableOffset;
+  uint32_t SpacePerGroup = FreeSpace / NumGroups;
+  ASSERT(SpacePerGroup >= 1);
+  uint32_t PtrOffset = SharedVariableOffset + (Group*SpacePerGroup);
+  if (SharedMemVariableSharingSpace[PtrOffset] != &SharedMemVariableSharingSpace[PtrOffset+1])
+    memory::freeGlobal(SharedMemVariableSharingSpace[PtrOffset], "new simd extended args");
+}
+
+void __kmpc_simd_get_shared_variables(void ***GlobalArgs) {
+  FunctionTracingRAII();
+  uint32_t Group = mapping::getSimdGroup();
+  uint32_t NumGroups = mapping::getNumSimdGroups();
+  uint32_t FreeSpace = NUM_SHARED_VARIABLES_IN_SHARED_MEM - SharedVariableOffset;
+  uint32_t SpacePerGroup = FreeSpace / NumGroups;
+  ASSERT(SpacePerGroup >= 1);
+  uint32_t PtrOffset = SharedVariableOffset + (Group*SpacePerGroup);
+  *GlobalArgs = (void**)SharedMemVariableSharingSpace[PtrOffset];
+}
+
+}
+
+void state::setSimdState(uint32_t Group, uint8_t Mode) {
+  TeamState.SimdStatesVar[Group] = Mode;
+}
+
+uint8_t state::getSimdState(uint32_t Group) {
+  return TeamState.SimdStatesVar[Group];
+}
+
+void state::getSimdWorkload(uint32_t SimdGroup, SimdRegionFnTy *WorkFn,
+                      uint64_t *SimdTripCount) {
+
+  *(WorkFn) = TeamState.SimdRegionFnVar[SimdGroup];
+  *(SimdTripCount) = TeamState.SimdTripCountVar[SimdGroup];
+}
+
+void state::setSimdWorkload(uint32_t SimdGroup, SimdRegionFnTy WorkFn,
+                      uint64_t SimdTripCount) {
+  TeamState.SimdRegionFnVar[SimdGroup] = WorkFn;
+  TeamState.SimdTripCountVar[SimdGroup] = SimdTripCount;
 }
 #pragma omp end declare target

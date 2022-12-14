@@ -14,6 +14,18 @@
 
 #include "Types.h"
 
+#ifndef OMP_MAX_NUM_THREADS
+#define OMP_MAX_NUM_THREADS 1024
+#endif
+
+#ifndef OMP_SIMD_LENGTH
+#define OMP_SIMD_LENGTH 32
+#endif
+
+#ifndef OMP_PARALLEL_SPMD
+#define OMP_PARALLEL_SPMD 0
+#endif
+
 /// External API
 ///
 ///{
@@ -199,6 +211,13 @@ void __kmpc_end_sharing_variables();
 ///
 /// Called by the worker threads in the parallel region (function).
 void __kmpc_get_shared_variables(void ***GlobalArgs);
+
+void __kmpc_simd_begin_sharing_variables(void ***GlobalArgs, int32_t NumArgs);
+void __kmpc_simd_end_sharing_variables();
+void __kmpc_simd_get_shared_variables(void ***GlobalArgs);
+
+void __kmpc_simd_workshare(IdentTy*, SimdRegionFnTy, void**, uint64_t);
+void __kmpc_simd_state_machine(IdentTy*);
 
 /// External interface to get the thread ID.
 uint32_t __kmpc_get_hardware_thread_id_in_block();

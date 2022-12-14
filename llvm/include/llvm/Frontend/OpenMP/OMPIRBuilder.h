@@ -197,7 +197,7 @@ public:
                  FinalizeCallbackTy FiniCB, Value *IfCondition,
                  Value *NumThreads, omp::ProcBindKind ProcBind,
                  bool IsCancellable, std::function<std::tuple<Value*,EmittedClosureTy>(InsertPointTy)> DistanceCB,
-                 std::function<void(InsertPointTy, llvm::Value*)> LoopVarCB);
+                 std::function<Value*(InsertPointTy, llvm::Value*)> LoopVarCB);
 
 
   /// Generator for '#omp parallel'

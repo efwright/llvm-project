@@ -75,6 +75,86 @@ void invokeMicrotask(int32_t global_tid, int32_t bound_tid, void *fn,
   }
 }
 
+/*
+bool simdStateMachine() {
+  // TODO warp workers also need to catch signals from parallel,
+  // meaning that they go to the next step of the state machine
+
+  // Enter the Parallel state machine
+  do {
+
+    // Waiting for a parallel region to be encountered
+    synchronize::threads();
+
+    do {
+      SimdRegionFnTy WorkFn = 0;
+      uint64_t TripCount = 0;
+      void **Args = 0;
+
+      // Waiting for simd work
+      synchronize::warp(mapping::activemask());
+
+      bool IsActive = __kmpc_kernel_simd(&WorkFn, &TripCount, &Args);
+
+      // If WorkFn ptr is null current parallel region is done, move to synchronize.
+      if(!WorkFn)
+        break;
+
+      // If WarpId < SimdLen this thread will run.
+      if(IsActive) {
+        __kmpc_simd_workshare_loop(WorkFn, TripCount, Args);
+      }
+
+      // Work is finished
+      synchronize::warp(mapping::activemask());
+    } while(true);
+
+    // Recieved terminate signal from warp leader, no synchronizing with all threads
+    synchronize::threads();
+
+  } while(true);
+
+}
+
+// Fetch simd function ptr, trip count, and arguments
+bool __kmpc_kernel_simd(SimdRegionFnTy *WorkFn, uint64_t *TripCount, SimdArgumentsTy *Args) {
+  // TODO get FnPtr, TripCount, and Args from shared memory
+  uint32_t WarpId = mapping::getWarpId();
+  bool ThreadIsActive = WarpId < state::SimdLen; // TODO need to define SimdLen somewhere
+  return ThreadIsActive;
+}
+
+// Run the simd loop
+void __kmpc_simd_workshare_loop(void(uint64_t,void**)* WorkFn, uint64_t TripCount, void **Args) {
+  uint64_t omp_iv = (uint64_t)mapping::getThreadIdInWarp();
+  // TODO check if omp_iv < simdlen
+  uint64_t warpSize = (uint64_t)mapping::getWarpSize();
+  // TODO this should be incremented by simdlen and not warpsize
+  while(omp_iv < TripCount) {
+    WorkFn(omp_iv, Args);
+    omp_iv += warpSize;
+  }
+  return;
+}
+
+void __kmpc_simd_51(IdentTy *ident, uint64_t TripCount, void(uint64_t,void**) WorkFn, void **Args) {
+  // TODO check for SimdLen = 1
+  // TODO check for SPMD mode
+
+  // Generic mode fallback
+
+  // TODO add fn, tripcount, args to shared memory for this warp
+
+  // Notify workers
+  synchronize::warp(mapping::activemask());
+
+  // The master thread will always run the loop because the SimdLen must be at least 1
+  __kmpc_simd_workshare_loop(WorkFn, TripCount, Args);
+
+  // Wait for all threads to finish
+  synchronize::warp(mapping::activemask());
+}
+*/
 } // namespace
 
 extern "C" {
@@ -95,6 +175,7 @@ void __kmpc_parallel_51(IdentTy *ident, int32_t, int32_t if_expr,
   }
 
   uint32_t NumThreads = determineNumberOfThreads(num_threads);
+  uint32_t NumParallelThreads = NumThreads / mapping::getSimdGroupSize();
   if (mapping::isSPMDMode()) {
     // Avoid the race between the read of the `icv::Level` above and the write
     // below by synchronizing all threads here.
@@ -103,7 +184,7 @@ void __kmpc_parallel_51(IdentTy *ident, int32_t, int32_t if_expr,
       // Note that the order here is important. `icv::Level` has to be updated
       // last or the other updates will cause a thread specific state to be
       // created.
-      state::ValueRAII ParallelTeamSizeRAII(state::ParallelTeamSize, NumThreads,
+      state::ValueRAII ParallelTeamSizeRAII(state::ParallelTeamSize, NumParallelThreads, //NumThreads,
                                             1u, TId == 0, ident);
       state::ValueRAII ActiveLevelRAII(icv::ActiveLevel, 1u, 0u, TId == 0,
                                        ident);
@@ -117,8 +198,22 @@ void __kmpc_parallel_51(IdentTy *ident, int32_t, int32_t if_expr,
       ASSERT(icv::ActiveLevel == 1u);
       ASSERT(icv::Level == 1u);
 
-      if (TId < NumThreads)
+      if(OMP_PARALLEL_SPMD) {
+        //if (TId < NumThreads)
         invokeMicrotask(TId, 0, fn, args, nargs);
+      } else {
+        printf("about to split up\n");
+        if(mapping::isSimdGroupLeader()) {
+          invokeMicrotask(TId, 0, fn, args, nargs);
+          printf("pdone\n");
+          // Send termination signal to SIMD workers, end of parallel region.
+          //state::SimdRegionFn = (void*)nullptr;
+          state::setSimdState(mapping::getSimdGroup(), state::SIMD_Terminate);
+          synchronize::warp(mapping::simdmask());
+        } else {
+          __kmpc_simd_state_machine(ident);
+        }
+      }
 
       // Synchronize all threads at the end of a parallel region.
       synchronize::threadsAligned();
@@ -160,7 +255,7 @@ void __kmpc_parallel_51(IdentTy *ident, int32_t, int32_t if_expr,
     // Note that the order here is important. `icv::Level` has to be updated
     // last or the other updates will cause a thread specific state to be
     // created.
-    state::ValueRAII ParallelTeamSizeRAII(state::ParallelTeamSize, NumThreads,
+    state::ValueRAII ParallelTeamSizeRAII(state::ParallelTeamSize, NumParallelThreads,
                                           1u, true, ident);
     state::ValueRAII ParallelRegionFnRAII(state::ParallelRegionFn, wrapper_fn,
                                           (void *)nullptr, true, ident);

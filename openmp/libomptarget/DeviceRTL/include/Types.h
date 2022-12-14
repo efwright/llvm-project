@@ -149,6 +149,8 @@ struct IdentTy {
 using __kmpc_impl_lanemask_t = LaneMaskTy;
 
 using ParallelRegionFnTy = void *;
+using SimdRegionFnTy = void *;
+using SimdArgumentsTy = void**;
 
 using CriticalNameTy = int32_t[8];
 

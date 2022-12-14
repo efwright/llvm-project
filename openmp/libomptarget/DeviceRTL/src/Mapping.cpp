@@ -168,6 +168,29 @@ static bool isInLastWarp() {
   return mapping::getThreadIdInBlock() == MainTId;
 }
 
+uint32_t mapping::getSimdGroupSize() {
+  return OMP_SIMD_LENGTH;
+}
+
+uint32_t mapping::getSimdGroup() {
+  uint32_t SimdGroup =  mapping::getThreadIdInBlock() / mapping::getSimdGroupSize();
+  return SimdGroup;
+}
+
+uint32_t mapping::getSimdGroupId() {
+  uint32_t SimdId = mapping::getThreadIdInWarp() % mapping::getSimdGroupSize();
+  return SimdId;
+}
+
+bool mapping::isSimdGroupLeader() {
+  return !mapping::getSimdGroupId();
+}
+
+uint32_t mapping::getNumSimdGroups() {
+  uint32_t NumGroups = mapping::getBlockSize() / mapping::getSimdGroupSize();
+  return NumGroups;
+}
+
 bool mapping::isMainThreadInGenericMode(bool IsSPMD) {
   if (IsSPMD || icv::Level)
     return false;
@@ -190,6 +213,19 @@ bool mapping::isLeaderInWarp() {
   __kmpc_impl_lanemask_t Active = mapping::activemask();
   __kmpc_impl_lanemask_t LaneMaskLT = mapping::lanemaskLT();
   return utils::popc(Active & LaneMaskLT) == 0;
+}
+
+LaneMaskTy mapping::allmask() { return ~(LaneMaskTy)0; }
+
+LaneMaskTy mapping::simdmask() {
+/*  uint32_t GroupSize = mapping::getSimdGroupSize();
+  uint32_t Group = mapping::getSimdGroup();
+  uint32_t WarpSize = mapping::getWarpSize();
+  LaneMaskTy Mask = ~(LaneMaskTy)0;
+  Mask = Mask >> (WarpSize - GroupSize);
+  Mask = Mask << (Group * GroupSize);
+  return Mask;*/
+  return mapping::allmask();
 }
 
 LaneMaskTy mapping::activemask() { return impl::activemask(); }
@@ -253,6 +289,8 @@ uint32_t mapping::getNumberOfProcessorElements() {
   return NumberOfProcessorElements;
 }
 
+
+
 ///}
 
 /// Execution mode
@@ -261,8 +299,12 @@ uint32_t mapping::getNumberOfProcessorElements() {
 static int SHARED(IsSPMDMode);
 
 void mapping::init(bool IsSPMD) {
-  if (mapping::isInitialThreadInLevel0(IsSPMD))
+  ASSERT(mapping::getSimdGroupSize() <= mapping::getWarpSize() &&
+         "Simd length cannot be larger than warp length");
+  if (mapping::isInitialThreadInLevel0(IsSPMD)) {
     IsSPMDMode = IsSPMD;
+    printf("Simd initialization: GroupSize=%i, NumGroups=%i\n", mapping::getSimdGroupSize(), mapping::getNumSimdGroups());
+  }
 }
 
 bool mapping::isSPMDMode() { return IsSPMDMode; }

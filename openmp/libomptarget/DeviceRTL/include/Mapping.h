@@ -14,9 +14,17 @@
 
 #include "Types.h"
 
+#define OMP_SIMD_GROUP_SIZE 32
+
 namespace _OMP {
 
 namespace mapping {
+
+uint32_t getSimdGroupSize();
+uint32_t getSimdGroup();
+uint32_t getSimdGroupId();
+bool isSimdGroupLeader();
+uint32_t getNumSimdGroups();
 
 #pragma omp declare target
 
@@ -28,6 +36,7 @@ inline constexpr uint32_t MaxThreadsPerTeam = 1024;
 void init(bool IsSPMD);
 
 /// Return true if the kernel is executed in SPMD mode.
+/// Changed to return true if teams is SPMD mode.
 bool isSPMDMode();
 
 /// Return true if the kernel is executed in generic mode.
@@ -50,6 +59,9 @@ bool isInitialThreadInLevel0(bool IsSPMD);
 /// Return true if the executing thread has the lowest Id of the active threads
 /// in the warp.
 bool isLeaderInWarp();
+
+LaneMaskTy allmask();
+LaneMaskTy simdmask();
 
 /// Return a mask describing all active threads in the warp.
 LaneMaskTy activemask();
