@@ -864,6 +864,45 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createWorkshareLoop(
       if(auto RegAlloca = dyn_cast<AllocaInst>(&V)) {
         ToBeFreedFromShared.push_back(RegAlloca);
 
+        BasicBlock *ParallelEndBlock = &(RegAlloca->getParent()->getParent()->back());
+
+      if(!OMP_PARALLEL_SPMD) {
+        //SetVector<Use *> Uses;
+        //for (Use &U : RegAlloca->uses())
+          //if (auto *UserI = dyn_cast<Instruction>(U.getUser()))
+            //if (CallBlock == UserI->getParent())
+              //Uses.insert(&U);
+
+        //Builder.SetInsertPoint(RegAlloca);
+        Builder.restoreIP(OuterAllocaIP);
+        FunctionCallee SharedAllocaFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_alloc_shared);
+        Value *SharedAllocaSizeInBytes =
+          ConstantInt::get(Int64, *(RegAlloca->getAllocationSizeInBits(M.getDataLayout())) / 8, false);
+        Value *SharedAllocaArgs[] = {SharedAllocaSizeInBytes};
+     
+        llvm::Value *SharedAllocaCall =
+          Builder.CreateCall(SharedAllocaFn,
+                             ArrayRef<Value*>(SharedAllocaArgs, 1));
+        llvm::Value *ReplacementValue = Builder.CreateBitCast(
+          SharedAllocaCall, RegAlloca->getType(), RegAlloca->getName() + ".shared");
+        //Builder.CreateStore(
+        //  Builder.CreateLoad(LocalAlloca->getAllocatedType(), LocalAlloca),
+        //  ReplacementValue);
+
+        //for (Use *UPtr : Uses)
+        //  UPtr->set(ReplacementValue);
+        RegAlloca->replaceAllUsesWith(ReplacementValue);
+        RegAlloca->eraseFromParent();
+
+        Builder.SetInsertPoint(ParallelEndBlock, ParallelEndBlock->begin());
+        FunctionCallee SharedFreeFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_free_shared);
+        Value *SharedFreeArgs[] = {SharedAllocaCall, SharedAllocaSizeInBytes};
+        Builder.CreateCall(SharedFreeFn, ArrayRef<Value*>(SharedFreeArgs, 2));
+
+
+      }
+
+
         //Builder.SetInsertPoint(OuterAllocaBlock->getTerminator());
         //FunctionCallee SharedAllocaFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_alloc_shared);
         //Value *AllocArgs[] = {CGF.getTypeSize(VD->getType())
@@ -971,43 +1010,6 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createWorkshareLoop(
     dbgs() << "Num frees needed " << ToBeFreedFromShared.size() << "\n";
 
     dbgs() << "With runtime call placed: " << *Builder.GetInsertBlock()->getParent() << "\n";
-
-    for(AllocaInst *LocalAlloca : ToBeFreedFromShared) {
-      SetVector<Use *> Uses;
-      for (Use &U : LocalAlloca->uses())
-        if (auto *UserI = dyn_cast<Instruction>(U.getUser()))
-          if (CallBlock == UserI->getParent())
-            Uses.insert(&U);
-
-      Builder.SetInsertPoint(LRegAllocaBB, LRegAllocaBB->begin());
-      FunctionCallee SharedAllocaFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_alloc_shared);
-      Value *SharedAllocaSizeInBytes =
-        ConstantInt::get(Int64, *(LocalAlloca->getAllocationSizeInBits(M.getDataLayout())) / 8, false);
-      Value *SharedAllocaArgs[] = {SharedAllocaSizeInBytes};
-      //Builder.SetInsertPoint(RegAlloca);
-     
-      llvm::Value *SharedAllocaCall =
-        Builder.CreateCall(SharedAllocaFn,
-                           ArrayRef<Value*>(SharedAllocaArgs, 1));
-      llvm::Value *ReplacementValue = Builder.CreateBitCast(
-        SharedAllocaCall, LocalAlloca->getType(), LocalAlloca->getName() + ".shared");
-      Builder.CreateStore(
-        Builder.CreateLoad(LocalAlloca->getAllocatedType(), LocalAlloca),
-        ReplacementValue);
-
-      for (Use *UPtr : Uses)
-        UPtr->set(ReplacementValue);
-
-      Builder.SetInsertPoint(CallBlock->getTerminator());
-      FunctionCallee SharedFreeFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_free_shared);
-      Value *SharedFreeArgs[] = {SharedAllocaCall, SharedAllocaSizeInBytes};
-      Builder.CreateCall(SharedFreeFn, ArrayRef<Value*>(SharedFreeArgs, 2));
-
-
-    }
-
-    dbgs() << "With shared mem: " << *Builder.GetInsertBlock()->getParent() << "\n";
-
 
     InsertPointTy ExitIP(PRegExitBB, PRegExitBB->end());
 
