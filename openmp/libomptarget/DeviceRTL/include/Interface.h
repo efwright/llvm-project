@@ -23,8 +23,9 @@
 #endif
 
 #ifndef OMP_PARALLEL_SPMD
-#define OMP_PARALLEL_SPMD 0
+#define OMP_PARALLEL_SPMD 1
 #endif
+
 
 /// External API
 ///

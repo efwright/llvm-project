@@ -118,13 +118,98 @@ template <typename T, typename ST> struct omptarget_nvptx_LoopSupport {
   ////////////////////////////////////////////////////////////////////////////////
   // Support for Static Init
 
+  static void distribute_static_init(int32_t, int32_t schedtype,
+                              int32_t *plastiter, T *plower, T *pupper,
+                              ST *pstride, ST chunk, bool IsSPMDExecutionMode) {
+    uint32_t gtid = omp_get_thread_num();
+    uint32_t numberOfActiveOMPThreads = mapping::getNumSimdGroups(); //omp_get_num_threads();
+
+    //printf("distribute_static_init gtid=%i, num=%i\n", gtid, numberOfActiveOMPThreads);
+
+    // All warps that are in excess of the maximum requested, do
+    // not execute the loop
+    ASSERT0(LT_FUSSY, gtid < numberOfActiveOMPThreads,
+            "current thread is not needed here; error");
+
+    // copy
+    int lastiter = 0;
+    T lb = *plower;
+    T ub = *pupper;
+    ST stride = *pstride;
+
+    // init
+    switch (SCHEDULE_WITHOUT_MODIFIERS(schedtype)) {
+    case kmp_sched_static_chunk: {
+      if (chunk > 0) {
+        ForStaticChunk(lastiter, lb, ub, stride, chunk, gtid,
+                       numberOfActiveOMPThreads);
+        break;
+      }
+    } // note: if chunk <=0, use nochunk
+    case kmp_sched_static_balanced_chunk: {
+      if (chunk > 0) {
+        // round up to make sure the chunk is enough to cover all iterations
+        T tripCount = ub - lb + 1; // +1 because ub is inclusive
+        T span = (tripCount + numberOfActiveOMPThreads - 1) /
+                 numberOfActiveOMPThreads;
+        // perform chunk adjustment
+        chunk = (span + chunk - 1) & ~(chunk - 1);
+
+        ASSERT0(LT_FUSSY, ub >= lb, "ub must be >= lb.");
+        T oldUb = ub;
+        ForStaticChunk(lastiter, lb, ub, stride, chunk, gtid,
+                       numberOfActiveOMPThreads);
+        if (ub > oldUb)
+          ub = oldUb;
+        break;
+      }
+    } // note: if chunk <=0, use nochunk
+    case kmp_sched_static_nochunk: {
+      ForStaticNoChunk(lastiter, lb, ub, stride, chunk, gtid,
+                       numberOfActiveOMPThreads);
+      break;
+    }
+    case kmp_sched_distr_static_chunk: {
+      if (chunk > 0) {
+        ForStaticChunk(lastiter, lb, ub, stride, chunk, omp_get_team_num(),
+                       omp_get_num_teams());
+        break;
+      } // note: if chunk <=0, use nochunk
+    }
+    case kmp_sched_distr_static_nochunk: {
+      ForStaticNoChunk(lastiter, lb, ub, stride, chunk, omp_get_team_num(),
+                       omp_get_num_teams());
+      break;
+    }
+    case kmp_sched_distr_static_chunk_sched_static_chunkone: {
+      ForStaticChunk(lastiter, lb, ub, stride, chunk,
+                     numberOfActiveOMPThreads * omp_get_team_num() + gtid,
+                     omp_get_num_teams() * numberOfActiveOMPThreads);
+      break;
+    }
+    default: {
+      // ASSERT(LT_FUSSY, 0, "unknown schedtype %d", (int)schedtype);
+      ForStaticChunk(lastiter, lb, ub, stride, chunk, gtid,
+                     numberOfActiveOMPThreads);
+      break;
+    }
+    }
+    // copy back
+    *plastiter = lastiter;
+    *plower = lb;
+    *pupper = ub;
+    *pstride = stride;
+  }
+
+
+
   static void for_static_init(int32_t, int32_t schedtype,
                               int32_t *plastiter, T *plower, T *pupper,
                               ST *pstride, ST chunk, bool IsSPMDExecutionMode) {
     uint32_t gtid = mapping::getSimdGroup();  //omp_get_thread_num();
     uint32_t numberOfActiveOMPThreads = mapping::getNumSimdGroups(); //omp_get_num_threads();
 
-    printf("for_static_init gtid=%i, num=%i\n", gtid, numberOfActiveOMPThreads);
+    //printf("for_static_init gtid=%i, num=%i", gtid, numberOfActiveOMPThreads);
 
     // All warps that are in excess of the maximum requested, do
     // not execute the loop
@@ -498,37 +583,45 @@ void __kmpc_simd_51(IdentTy *ident, void(uint64_t,void**) WorkFn, uint64_t TripC
 
 void __kmpc_simd_51(IdentTy *ident, void (*WorkFn)(int64_t, void**), uint64_t TripCount, void **Args, int32_t NumArgs)
 {
-  printf("simd_51\n");
-
   if(OMP_PARALLEL_SPMD) {
+    //printf("simd_51 g=%u id=%u\n", mapping::getSimdGroup(), mapping::getThreadIdInBlock());
+    //printf("simd_51\n");
+    //printf("%p %p\n", WorkFn, Args);
 
-    if(mapping::getThreadIdInBlock() == 0) {
-      printf("    Running simd loop in SPMD mode %p(%p) for %lu iterations\n", WorkFn, Args, TripCount);
-    }
+    //if(mapping::getThreadIdInBlock() == 0) {
+    //  printf("    Running simd loop in SPMD mode %p(%p) for %lu iterations\n", WorkFn, Args, TripCount);
+    //}
 
-    synchronize::threads();
+//printf("simd_51\n");
 
+    //synchronize::threads();
+    //__kmpc_barrier(ident, mapping::getThreadIdInBlock
     uint64_t omp_iv = mapping::getSimdGroupId();
     while(omp_iv < TripCount) {
       WorkFn(omp_iv, Args);
       omp_iv += mapping::getSimdGroupSize();
     }
 
-    synchronize::threads();
+    //__kmpc_barrier(ident, mapping::getThreadIdInBlock());
 
-    if(mapping::getThreadIdInBlock() == 0) {
-      printf("    Simd loop is finished\n");
-    }
+    //synchronize::threads();
+
+//printf("end simd\n");
+
+    //if(mapping::getThreadIdInBlock() == 0) {
+      //printf("    Simd loop is finished\n");
+    //}
 
     return;
   }
 
-  printf("      Simd main %i starting simd_51 %p(%p) for %lu iterations\n", mapping::getThreadIdInBlock(), WorkFn, Args, TripCount);
+  //printf("      Simd main %i starting simd_51 %p(%p) for %lu iterations\n", mapping::getThreadIdInBlock(), WorkFn, Args, TripCount);
+
 
   void **SharedArgs;
   __kmpc_simd_begin_sharing_variables(&SharedArgs, NumArgs);
 
-  printf("        Simd main %i sharing %i variables at %p\n", mapping::getThreadIdInBlock(), NumArgs, SharedArgs);
+  //printf("        Simd main %i sharing %i variables at %p\n", mapping::getThreadIdInBlock(), NumArgs, SharedArgs);
 
   for(int i = 0; i < NumArgs; i++)
     SharedArgs[i] = Args[i];
@@ -537,8 +630,9 @@ void __kmpc_simd_51(IdentTy *ident, void (*WorkFn)(int64_t, void**), uint64_t Tr
   state::setSimdState(SimdGroup, state::SIMD_Loop);
   state::setSimdWorkload(SimdGroup, (void*)WorkFn, TripCount);
 
-  printf("        Simd main %i signaling workers\n", mapping::getThreadIdInBlock());
+  //printf("        Simd main %i signaling workers\n", mapping::getThreadIdInBlock());
   synchronize::warp(mapping::simdmask()); 
+  //printf("       Workers have receieved signal\n");
 
   __kmpc_simd_workshare(ident, (SimdRegionFnTy)WorkFn, SharedArgs, TripCount);
 
@@ -551,7 +645,7 @@ void __kmpc_simd_51(IdentTy *ident, void (*WorkFn)(int64_t, void**), uint64_t Tr
 /// State machine for SIMD workers when inside a parallel region.
 void __kmpc_simd_state_machine(IdentTy *ident) {
   FunctionTracingRAII();
-  printf("    Simd worker %i entered simd state machine\n", mapping::getThreadIdInBlock());
+  //printf("    Simd worker %i entered simd state machine\n", mapping::getThreadIdInBlock());
   uint32_t TId = mapping::getThreadIdInBlock();
   do {
     SimdRegionFnTy WorkFn;
@@ -560,6 +654,8 @@ void __kmpc_simd_state_machine(IdentTy *ident) {
     uint32_t SimdGroup = mapping::getSimdGroup();
 
     synchronize::warp(mapping::simdmask());
+
+    //printf("    Simd worker %i is doing stuff\n", mapping::getThreadIdInBlock());
 
     uint8_t Mode = state::getSimdState(SimdGroup);
     switch(Mode) {
@@ -570,12 +666,12 @@ void __kmpc_simd_state_machine(IdentTy *ident) {
         synchronize::warp(mapping::simdmask());
         break;
       case state::SIMD_Terminate:
-        printf("    Simd worker %i receieved simd termination signal\n", mapping::getThreadIdInBlock());
+        //printf("    Simd worker %i receieved simd termination signal\n", mapping::getThreadIdInBlock());
         return;
       case state::SIMD_EndFor:
-        printf("    Simd worker %u receieved end for signal\n", mapping::getThreadIdInBlock());
+        //printf("    Simd worker %u receieved end for signal\n", mapping::getThreadIdInBlock());
         __kmpc_barrier(ident, TId);
-        printf("Past the barrier\n");
+        //printf("Past the barrier\n");
         break;
       default:
         printf("WRONG STATE\n");
@@ -590,7 +686,7 @@ void __kmpc_simd_workshare(IdentTy *ident, SimdRegionFnTy WorkFn, void **Args, u
 {
   ASSERT(WorkFn);
 
-  printf("      Simd worker %i running %p(%p) for %lu iterations\n", mapping::getThreadIdInBlock(), WorkFn, Args, TripCount);
+  //printf("      Simd worker %i running %p(%p) for %lu iterations\n", mapping::getThreadIdInBlock(), WorkFn, Args, TripCount);
 
   synchronize::warp(mapping::simdmask());
 
@@ -712,7 +808,7 @@ void __kmpc_for_static_init_4(IdentTy *loc, int32_t global_tid,
                               int32_t *plower, int32_t *pupper,
                               int32_t *pstride, int32_t incr, int32_t chunk) {
   FunctionTracingRAII();
-  printf("__kmpc_for_static_init\n");
+  //printf("__kmpc_for_static_init\n");
   omptarget_nvptx_LoopSupport<int32_t, int32_t>::for_static_init(
       global_tid, schedtype, plastiter, plower, pupper, pstride, chunk,
       mapping::isSPMDMode());
@@ -754,7 +850,7 @@ void __kmpc_distribute_static_init_4(IdentTy *loc, int32_t global_tid,
                                      int32_t *pstride, int32_t incr,
                                      int32_t chunk) {
   FunctionTracingRAII();
-  omptarget_nvptx_LoopSupport<int32_t, int32_t>::for_static_init(
+  omptarget_nvptx_LoopSupport<int32_t, int32_t>::distribute_static_init(
       global_tid, schedtype, plastiter, plower, pupper, pstride, chunk,
       mapping::isSPMDMode());
 }
@@ -765,7 +861,7 @@ void __kmpc_distribute_static_init_4u(IdentTy *loc, int32_t global_tid,
                                       int32_t *pstride, int32_t incr,
                                       int32_t chunk) {
   FunctionTracingRAII();
-  omptarget_nvptx_LoopSupport<uint32_t, int32_t>::for_static_init(
+  omptarget_nvptx_LoopSupport<uint32_t, int32_t>::distribute_static_init(
       global_tid, schedtype, plastiter, plower, pupper, pstride, chunk,
       mapping::isSPMDMode());
 }
@@ -776,7 +872,7 @@ void __kmpc_distribute_static_init_8(IdentTy *loc, int32_t global_tid,
                                      int64_t *pstride, int64_t incr,
                                      int64_t chunk) {
   FunctionTracingRAII();
-  omptarget_nvptx_LoopSupport<int64_t, int64_t>::for_static_init(
+  omptarget_nvptx_LoopSupport<int64_t, int64_t>::distribute_static_init(
       global_tid, schedtype, plastiter, plower, pupper, pstride, chunk,
       mapping::isSPMDMode());
 }
@@ -787,19 +883,19 @@ void __kmpc_distribute_static_init_8u(IdentTy *loc, int32_t global_tid,
                                       int64_t *pstride, int64_t incr,
                                       int64_t chunk) {
   FunctionTracingRAII();
-  omptarget_nvptx_LoopSupport<uint64_t, int64_t>::for_static_init(
+  omptarget_nvptx_LoopSupport<uint64_t, int64_t>::distribute_static_init(
       global_tid, schedtype, plastiter, plower, pupper, pstride, chunk,
       mapping::isSPMDMode());
 }
 
 void __kmpc_for_static_fini(IdentTy *loc, int32_t global_tid) {
   FunctionTracingRAII();
-  printf("for_static_fini\n");
-  if(!OMP_PARALLEL_SPMD) {
-    printf("signaling the workers end of fini\n");
-    state::setSimdState(mapping::getSimdGroup(), state::SIMD_EndFor);
-    synchronize::warp(mapping::simdmask());
-  }
+  //printf("for_static_fini\n");
+  //if(!OMP_PARALLEL_SPMD) {
+  //  printf("signaling the workers end of fini\n");
+  //  state::setSimdState(mapping::getSimdGroup(), state::SIMD_EndFor);
+  //  synchronize::warp(mapping::simdmask());
+  //}
 }
 
 void __kmpc_distribute_static_fini(IdentTy *loc, int32_t global_tid) {

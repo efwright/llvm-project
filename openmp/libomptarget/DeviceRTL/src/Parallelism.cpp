@@ -164,6 +164,8 @@ void __kmpc_parallel_51(IdentTy *ident, int32_t, int32_t if_expr,
                         void *wrapper_fn, void **args, int64_t nargs) {
   FunctionTracingRAII();
 
+  //printf("Parallel 51 id=%u\n", mapping::getThreadIdInBlock());
+
   uint32_t TId = mapping::getThreadIdInBlock();
   // Handle the serialized case first, same for SPMD/non-SPMD.
   if (OMP_UNLIKELY(!if_expr || icv::Level)) {
@@ -175,8 +177,9 @@ void __kmpc_parallel_51(IdentTy *ident, int32_t, int32_t if_expr,
   }
 
   uint32_t NumThreads = determineNumberOfThreads(num_threads);
-  uint32_t NumParallelThreads = NumThreads / mapping::getSimdGroupSize();
+  uint32_t NumParallelThreads = mapping::getNumSimdGroups(); //NumThreads / mapping::getSimdGroupSize();
   if (mapping::isSPMDMode()) {
+    //printf("SPMD\n");
     // Avoid the race between the read of the `icv::Level` above and the write
     // below by synchronizing all threads here.
     synchronize::threadsAligned();
@@ -202,10 +205,10 @@ void __kmpc_parallel_51(IdentTy *ident, int32_t, int32_t if_expr,
         //if (TId < NumThreads)
         invokeMicrotask(TId, 0, fn, args, nargs);
       } else {
-        printf("about to split up\n");
+        //printf("about to split up\n");
         if(mapping::isSimdGroupLeader()) {
           invokeMicrotask(TId, 0, fn, args, nargs);
-          printf("pdone\n");
+          //printf("pdone\n");
           // Send termination signal to SIMD workers, end of parallel region.
           //state::SimdRegionFn = (void*)nullptr;
           state::setSimdState(mapping::getSimdGroup(), state::SIMD_Terminate);

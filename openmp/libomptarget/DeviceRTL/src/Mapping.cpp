@@ -218,14 +218,13 @@ bool mapping::isLeaderInWarp() {
 LaneMaskTy mapping::allmask() { return ~(LaneMaskTy)0; }
 
 LaneMaskTy mapping::simdmask() {
-/*  uint32_t GroupSize = mapping::getSimdGroupSize();
+  uint32_t GroupSize = mapping::getSimdGroupSize();
   uint32_t Group = mapping::getSimdGroup();
   uint32_t WarpSize = mapping::getWarpSize();
   LaneMaskTy Mask = ~(LaneMaskTy)0;
-  Mask = Mask >> (WarpSize - GroupSize);
-  Mask = Mask << (Group * GroupSize);
-  return Mask;*/
-  return mapping::allmask();
+  Mask = Mask >> (sizeof(LaneMaskTy)*8 - GroupSize);
+  Mask = Mask << (Group * GroupSize) % WarpSize;
+  return Mask;
 }
 
 LaneMaskTy mapping::activemask() { return impl::activemask(); }
@@ -303,7 +302,7 @@ void mapping::init(bool IsSPMD) {
          "Simd length cannot be larger than warp length");
   if (mapping::isInitialThreadInLevel0(IsSPMD)) {
     IsSPMDMode = IsSPMD;
-    printf("Simd initialization: GroupSize=%i, NumGroups=%i\n", mapping::getSimdGroupSize(), mapping::getNumSimdGroups());
+    //printf("Simd initialization: GroupSize=%i, NumGroups=%i\n", mapping::getSimdGroupSize(), mapping::getNumSimdGroups());
   }
 }
 

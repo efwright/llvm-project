@@ -64,7 +64,7 @@ static void genericStateMachine(IdentTy *Ident) {
 static void teamsStateMachine(IdentTy *ident) {
   FunctionTracingRAII();
 
-  printf("Thread %i entered state machine (G=%i, GId=%i)\n", mapping::getThreadIdInBlock(), mapping::getSimdGroup(), mapping::getSimdGroupId());
+  //printf("Thread %i entered state machine (G=%i, GId=%i, Mask=%lu)\n", mapping::getThreadIdInBlock(), mapping::getSimdGroup(), mapping::getSimdGroupId(), mapping::simdmask());
 
   do {
     ParallelRegionFnTy ParallelFn = 0;
@@ -75,30 +75,31 @@ static void teamsStateMachine(IdentTy *ident) {
 
     if (!ParallelFn) {
       // Termination signal, exit target region.
-      printf("  Receieved target terminate signal\n");
+      //printf("  Receieved target terminate signal\n");
       return;
     }
 
-    if(mapping::getThreadIdInBlock() == 0)
-      printf("  Parallel region encountered\n");
+    //if(mapping::getThreadIdInBlock() == 0)
+    //  printf("  Parallel region encountered\n");
 
     // If parallel SPMD is enabled all threads can safely run the parallel region.
     if(OMP_PARALLEL_SPMD) {
-      printf("  %u Running parallel region in SPMD mode\n", mapping::getThreadIdInBlock());
-      uint32_t TId = mapping::getThreadIdInBlock();
+//printf("parallelspmd\n");
+      //printf("  %u Running parallel region in SPMD mode\n", mapping::getThreadIdInBlock());
+      uint32_t TId = mapping::getSimdGroup(); //mapping::getThreadIdInBlock();
       ((void (*)(uint32_t, uint32_t))ParallelFn)(0, TId);
-
+//printf("parallelfinished\n");
     // If running in generic mode, SIMD workers must enter the next stage of the state machine.
     } else {
-      if(mapping::getThreadIdInBlock() == 0)
-        printf("  Running parallel region in generic mode\n");
+      //if(mapping::getThreadIdInBlock() == 0)
+      //  printf("  Running parallel region in generic mode\n");
       if(mapping::isSimdGroupLeader()) {
-        printf("    Simd main %i is running the parallel region\n", mapping::getThreadIdInBlock());
-        uint32_t TId = mapping::getThreadIdInBlock();
+        //printf("    Simd main %i is running the parallel region\n", mapping::getThreadIdInBlock());
+        uint32_t TId = mapping::getSimdGroup(); //mapping::getThreadIdInBlock();
         ((void (*)(uint32_t, uint32_t))ParallelFn)(0, TId);
 
         // Send termination signal to SIMD workers, end of parallel region.
-        printf("    Simd main %i is sending termination signal to workers\n", mapping::getThreadIdInBlock());
+        //printf("    Simd main %i is sending termination signal to workers\n", mapping::getThreadIdInBlock());
         //state::SimdRegionFn = (void*)nullptr;
         state::setSimdState(mapping::getSimdGroup(), state::SIMD_Terminate);
         synchronize::warp(mapping::simdmask());
@@ -135,13 +136,13 @@ int32_t __kmpc_target_init(IdentTy *Ident, int8_t Mode,
     // code and workers will run into a barrier right away.
   }
 
-  if(IsSPMD) {
+  /*if(IsSPMD) {
     if(mapping::getThreadIdInBlock() == 0)
       printf("Target region is SPMD mode\n");
   } else {
     if(mapping::isInitialThreadInLevel0(IsSPMD))
       printf("Target region is generic mode\n");
-  }
+  }*/
 
   if (IsSPMD) {
     state::assumeInitialState(IsSPMD);

@@ -1821,9 +1821,12 @@ public:
 
 static void emitBody(CodeGenFunction &CGF, const Stmt *S, const Stmt *NextLoop,
                      int MaxLevel, int Level = 0) {
+  //llvm::dbgs() << "emitBody\n";
+
   assert(Level < MaxLevel && "Too deep lookup during loop body codegen.");
   const Stmt *SimplifiedS = S->IgnoreContainers();
   if (const auto *CS = dyn_cast<CompoundStmt>(SimplifiedS)) {
+    //llvm::dbgs() << "aaaaaaaaaaaaaaaaaaaaaaa\n";
     PrettyStackTraceLoc CrashInfo(
         CGF.getContext().getSourceManager(), CS->getLBracLoc(),
         "LLVM IR generation of compound statement ('{}')");
@@ -1834,7 +1837,9 @@ static void emitBody(CodeGenFunction &CGF, const Stmt *S, const Stmt *NextLoop,
       emitBody(CGF, CurStmt, NextLoop, MaxLevel, Level);
     return;
   }
+  //llvm::dbgs() << "bbbbbbbbbbbbbbbbbbbbbbbbbbb\n";
   if (SimplifiedS == NextLoop) {
+    //llvm::dbgs() << "ccccccccccccccccccccccccccc\n";
     if (auto *Dir = dyn_cast<OMPLoopTransformationDirective>(SimplifiedS))
       SimplifiedS = Dir->getTransformedStmt();
     if (const auto *CanonLoop = dyn_cast<OMPCanonicalLoop>(SimplifiedS))
@@ -1849,17 +1854,24 @@ static void emitBody(CodeGenFunction &CGF, const Stmt *S, const Stmt *NextLoop,
       S = CXXFor->getBody();
     }
     if (Level + 1 < MaxLevel) {
+      //llvm::dbgs() << "ddddddddddddddddddddddddddd\n";
       NextLoop = OMPLoopDirective::tryToFindNextInnerLoop(
           S, /*TryImperfectlyNestedLoops=*/true);
       emitBody(CGF, S, NextLoop, MaxLevel, Level + 1);
       return;
     }
   }
+  //llvm::dbgs() << "eeeeeeeeeeeeeeeeeeeeeee\n";
   CGF.EmitStmt(S);
+  //llvm::dbgs() << "fffffffffffffffffffff\n";
 }
 
 void CodeGenFunction::EmitOMPLoopBody(const OMPLoopDirective &D,
                                       JumpDest LoopExit) {
+
+  //llvm::dbgs() << "EmitOMPLoopBody\n";
+  //D.dump();
+
   RunCleanupsScope BodyScope(*this);
   // Update counters values on current iteration.
   for (const Expr *UE : D.updates())
@@ -1874,6 +1886,8 @@ void CodeGenFunction::EmitOMPLoopBody(const OMPLoopDirective &D,
     }
   }
 
+  //llvm::dbgs() << "111111111111111111111111111111\n";
+
   // On a continue in the body, jump to the end.
   JumpDest Continue = getJumpDestInCurrentScope("omp.body.continue");
   BreakContinueStack.push_back(BreakContinue(LoopExit, Continue));
@@ -1887,6 +1901,8 @@ void CodeGenFunction::EmitOMPLoopBody(const OMPLoopDirective &D,
                          getProfileCount(D.getBody()));
     EmitBlock(NextBB);
   }
+
+  //llvm::dbgs() << "22222222222222222222222222222222222\n";
 
   OMPPrivateScope InscanScope(*this);
   EmitOMPReductionClauseInit(D, InscanScope, /*ForInscan=*/true);
@@ -1908,6 +1924,8 @@ void CodeGenFunction::EmitOMPLoopBody(const OMPLoopDirective &D,
     EmitBlock(OMPBeforeScanBlock);
   }
 
+  //llvm::dbgs() << "33333333333333333333333333333333\n";
+
   // Emit loop variables for C++ range loops.
   const Stmt *Body =
       D.getInnermostCapturedStmt()->getCapturedStmt()->IgnoreContainers();
@@ -1917,13 +1935,20 @@ void CodeGenFunction::EmitOMPLoopBody(const OMPLoopDirective &D,
                Body, /*TryImperfectlyNestedLoops=*/true),
            D.getLoopsNumber());
 
+  //llvm::dbgs() << "3.5555555555555555555555555555555555\n";
+
   // Jump to the dispatcher at the end of the loop body.
   if (IsInscanRegion)
     EmitBranch(OMPScanExitBlock);
 
+  //llvm::dbgs() << "444444444444444444444444444444444\n";
+
   // The end (updates/cleanups).
   EmitBlock(Continue.getBlock());
   BreakContinueStack.pop_back();
+
+  //llvm::dbgs() << "END OMPLOOP\n";
+
 }
 
 using EmittedClosureTy = std::pair<llvm::Function *, llvm::Value *>;
@@ -1952,13 +1977,13 @@ emitCapturedStmtCall(CodeGenFunction &ParentCGF, EmittedClosureTy Cap,
   llvm::append_range(EffectiveArgs, Args);
   EffectiveArgs.push_back(Cap.second);
 
-  llvm::dbgs() << "emitCapturedStmtCall\n";
-  llvm::dbgs() << "Closure.first = " << *Cap.first << "\n";
-  llvm::dbgs() << "Closure.second = " << *Cap.second << "\n";
-  llvm::dbgs() << "Passed args:\n";
-  for(llvm::Value *arg : EffectiveArgs) {
-    llvm::dbgs() << *arg << "\n";
-  }
+  //llvm::dbgs() << "emitCapturedStmtCall\n";
+  //llvm::dbgs() << "Closure.first = " << *Cap.first << "\n";
+  //llvm::dbgs() << "Closure.second = " << *Cap.second << "\n";
+  //llvm::dbgs() << "Passed args:\n";
+  //for(llvm::Value *arg : EffectiveArgs) {
+  //  llvm::dbgs() << *arg << "\n";
+  //}
 
   return ParentCGF.Builder.CreateCall(Cap.first, EffectiveArgs);
 }
@@ -2677,6 +2702,8 @@ if(!CGM.getLangOpts().OpenMPIsDevice) {
 
 } // end not gpu
 
+  S.dump();
+
   // Get the OMPCanonicalLoop
   auto *CS = dyn_cast<CapturedStmt>(S.getAssociatedStmt());
   auto *CL = dyn_cast<OMPCanonicalLoop>(CS->getCapturedStmt());
@@ -2791,14 +2818,22 @@ if(!CGM.getLangOpts().OpenMPIsDevice) {
     OMPBuilderCBHelpers::OutlinedRegionBodyRAII ORB(*this, AllocaIP,
                                                     ContinuationBB);
 
+printf("bodygen\n");
+
+    Builder.restoreIP(AllocaIP);
+llvm::dbgs() << LoopVar << "\n";
+    llvm::AllocaInst *PlaceHolder =
+      Builder.CreateAlloca(LoopVar->getAllocatedType(), LoopVar->getAddressSpace(),
+                             LoopVar->getArraySize(), "loopvar.placeholder");
+
+printf("1\n");
+
     llvm::BasicBlock *CodeGenIPBB = CodeGenIP.getBlock();
     if (llvm::Instruction *CodeGenIPBBTI = CodeGenIPBB->getTerminator())
       CodeGenIPBBTI->eraseFromParent();
     Builder.SetInsertPoint(CodeGenIPBB);
 
-    llvm::AllocaInst *PlaceHolder =
-      Builder.CreateAlloca(LoopVar->getAllocatedType(), LoopVar->getAddressSpace(),
-                             LoopVar->getArraySize(), "loopvar.placeholder");
+printf("2\n");
 
     //llvm::BasicBlock *CodeGenIPBB = CodeGenIP.getBlock();
     //Builder.SetInsertPoint(CodeGenIPBB->getTerminator());
@@ -2808,6 +2843,8 @@ if(!CGM.getLangOpts().OpenMPIsDevice) {
     // Generate the LoopVar call saving its output to the placeholder
     emitCapturedStmtCall(*this, LoopVarClosure,
                           {PlaceHolder, Virtual});
+
+printf("3\n");
 
     // Replace the LoopVar the DistanceCB and LoopVarCB use because we want to use
     // a local alloca for the body
@@ -2819,15 +2856,22 @@ if(!CGM.getLangOpts().OpenMPIsDevice) {
     LoopVar->replaceAllUsesWith(NewLoopVar);
     LoopVar->removeFromParent();
 
+printf("4\n");
+
     // Now that the LoopVar in DistanceCB and LoopVarCB are replaced with a new value,
     // we need to replace our placeholder with the real local loop variable.
     LoopVar->insertBefore(PlaceHolder);
     PlaceHolder->replaceAllUsesWith(LoopVar);
     PlaceHolder->eraseFromParent();
 
+printf("5\n");
+
     // Now generate the body. The LoopVar should be a local alloca
     OMPBuilderCBHelpers::EmitOMPRegionBody(*this, loopBody,
                                            CodeGenIP, ContinuationBB);
+
+printf("6\n");
+
   };
 
   // Call into the OMPIRBuilder.

@@ -333,15 +333,22 @@ int32_t __kmpc_cancel_barrier(IdentTy *Loc, int32_t TId) {
 
 void __kmpc_barrier(IdentTy *Loc, int32_t TId) {
   FunctionTracingRAII();
-  printf("Barrier %u\n", TId);
-  synchronize::threads();
-  /*if (mapping::isMainThreadInGenericMode())
+  //printf("Barrier %u\n", TId);
+  if(!OMP_PARALLEL_SPMD) {
+    printf("signaling the workers kmpc_barrier\n");
+    state::setSimdState(mapping::getSimdGroup(), state::SIMD_EndFor);
+    synchronize::warp(mapping::simdmask());
+  }
+  //printf("kmpc_barrier\n");
+  //synchronize::threads();
+  if (mapping::isMainThreadInGenericMode())
     return __kmpc_flush(Loc);
 
   if (mapping::isSPMDMode())
     return __kmpc_barrier_simple_spmd(Loc, TId);
 
-  impl::namedBarrier();*/
+  impl::namedBarrier();
+  //printf("After barrier\n");
 }
 
 __attribute__((noinline)) void __kmpc_barrier_simple_spmd(IdentTy *Loc,

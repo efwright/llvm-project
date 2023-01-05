@@ -553,7 +553,7 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::testLoopWrapper(
 }
 
 #ifndef OMP_PARALLEL_SPMD
-#define OMP_PARALLEL_SPMD 0
+#define OMP_PARALLEL_SPMD 1
 #endif
 
 // createWorkshare: Will eventually be able to support distribute, for and simd loops.
@@ -865,7 +865,7 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createWorkshareLoop(
         ToBeFreedFromShared.push_back(RegAlloca);
 
         BasicBlock *ParallelEndBlock = &(RegAlloca->getParent()->getParent()->back());
-
+/*
       if(!OMP_PARALLEL_SPMD) {
         //SetVector<Use *> Uses;
         //for (Use &U : RegAlloca->uses())
@@ -901,7 +901,7 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createWorkshareLoop(
 
 
       }
-
+*/
 
         //Builder.SetInsertPoint(OuterAllocaBlock->getTerminator());
         //FunctionCallee SharedAllocaFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_alloc_shared);
@@ -979,6 +979,8 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createWorkshareLoop(
 
   int NumInputs = Inputs.size()-1; // One argument is always omp.iv
   OI.PostOutlineCB = [=](Function &OutlinedFn) {
+    llvm::dbgs() << "SIMD Outline\n";
+
     // Add some known attributes.
     OutlinedFn.addFnAttr(Attribute::NoUnwind);
     OutlinedFn.addFnAttr(Attribute::NoRecurse);
@@ -1007,9 +1009,48 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createWorkshareLoop(
 
     CallInst *Simd51Call = Builder.CreateCall(RTLFn, RealArgs);
 
+    dbgs() << "With runtime call placed: " << *Builder.GetInsertBlock()->getParent() << "\n";
+
     dbgs() << "Num frees needed " << ToBeFreedFromShared.size() << "\n";
 
-    dbgs() << "With runtime call placed: " << *Builder.GetInsertBlock()->getParent() << "\n";
+   for(AllocaInst *RegAlloca : ToBeFreedFromShared) {
+      if(!OMP_PARALLEL_SPMD) {
+      if(RegAlloca->getParent()) {
+        BasicBlock *ParallelEndBlock = &(RegAlloca->getParent()->getParent()->back());
+ 
+        Builder.restoreIP(OuterAllocaIP);
+        FunctionCallee SharedAllocaFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_alloc_shared);
+        Value *SharedAllocaSizeInBytes =
+          ConstantInt::get(Int64, *(RegAlloca->getAllocationSizeInBits(M.getDataLayout())) / 8, false);
+        Value *SharedAllocaArgs[] = {SharedAllocaSizeInBytes};
+     
+        llvm::Value *SharedAllocaCall =
+          Builder.CreateCall(SharedAllocaFn,
+                             ArrayRef<Value*>(SharedAllocaArgs, 1));
+        llvm::Value *ReplacementValue = Builder.CreateBitCast(
+          SharedAllocaCall, RegAlloca->getType(), RegAlloca->getName() + ".shared");
+        //Builder.CreateStore(
+        //  Builder.CreateLoad(LocalAlloca->getAllocatedType(), LocalAlloca),
+        //  ReplacementValue);
+
+        //for (Use *UPtr : Uses)
+        //  UPtr->set(ReplacementValue);
+        RegAlloca->replaceAllUsesWith(ReplacementValue);
+        RegAlloca->eraseFromParent();
+
+        Builder.SetInsertPoint(ParallelEndBlock, ParallelEndBlock->begin());
+        FunctionCallee SharedFreeFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_free_shared);
+        Value *SharedFreeArgs[] = {SharedAllocaCall, SharedAllocaSizeInBytes};
+        Builder.CreateCall(SharedFreeFn, ArrayRef<Value*>(SharedFreeArgs, 2));
+
+
+      }
+      }
+
+
+    }
+
+    dbgs() << "With shared promotion: " << *Builder.GetInsertBlock()->getParent() << "\n";
 
     InsertPointTy ExitIP(PRegExitBB, PRegExitBB->end());
 
@@ -1030,6 +1071,8 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createWorkshareLoop(
 
   InsertPointTy AfterIP(UI->getParent(), UI->getParent()->end());
   UI->eraseFromParent();
+
+  dbgs() << "createWorkshare finished\n";
 
   return AfterIP;
 
