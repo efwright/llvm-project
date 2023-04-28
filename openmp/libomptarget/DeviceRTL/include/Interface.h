@@ -19,7 +19,7 @@
 #endif
 
 #ifndef OMP_SIMD_LENGTH
-#define OMP_SIMD_LENGTH 32
+#define OMP_SIMD_LENGTH 1
 #endif
 
 #ifndef OMP_PARALLEL_SPMD

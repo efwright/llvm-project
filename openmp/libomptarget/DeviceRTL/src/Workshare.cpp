@@ -697,6 +697,28 @@ void __kmpc_simd_workshare(IdentTy *ident, SimdRegionFnTy WorkFn, void **Args, u
   }
 }
 
+void __kmpc_for_workshare(IdentTy *ident, LoopFnTy WorkFn, void **Args, uint64_t TripCount)
+{
+  ASSERT(WorkFn);
+
+  uint64_t omp_iv = (uint64_t)mapping::getSimdGroup();
+  while(omp_iv < TripCount) {
+    ((void (*)(uint64_t, void**))WorkFn)(omp_iv, Args);
+    omp_iv += mapping::getNumSimdGroups();
+  }
+}
+
+void __kmpc_distribute_workshare(IdentTy *ident, LoopFnTy WorkFn, void **Args, uint64_t TripCount)
+{
+  ASSERT(WorkFn);
+
+  uint64_t omp_iv = (uint64_t)mapping::getBlockId();
+  while(omp_iv < TripCount) {
+    ((void (*)(uint64_t, void**))WorkFn)(omp_iv, Args);
+    omp_iv += mapping::getNumberOfBlocks();
+  }
+}
+
 
 
 void __kmpc_test_distribute(IdentTy *ident, void (*fn)(int64_t, void**), int64_t tripcount, void **args)

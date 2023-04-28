@@ -193,11 +193,19 @@ public:
   /// Generator for '#omp distribute'
   IRBuilder<>::InsertPoint
   createWorkshareLoop(const LocationDescription &Loc, InsertPointTy AllocaIP,
-                 std::function<void(InsertPointTy, InsertPointTy, BasicBlock&, Value*, EmittedClosureTy)> BodyGenCB, PrivatizeCallbackTy PrivCB,
-                 FinalizeCallbackTy FiniCB, Value *IfCondition,
-                 Value *NumThreads, omp::ProcBindKind ProcBind,
-                 bool IsCancellable, std::function<std::tuple<Value*,EmittedClosureTy>(InsertPointTy)> DistanceCB,
-                 std::function<Value*(InsertPointTy, llvm::Value*)> LoopVarCB);
+                 std::function<void(InsertPointTy, InsertPointTy, BasicBlock&, Value*)> BodyGenCB, PrivatizeCallbackTy PrivCB,
+                 FinalizeCallbackTy FiniCB, std::function<Value*(InsertPointTy)> DistanceCB, int loopDirective);
+
+  IRBuilder<>::InsertPoint
+  createSimdLoop(const LocationDescription &Loc, InsertPointTy AllocaIP,
+                 std::function<void(InsertPointTy, InsertPointTy, BasicBlock&, Value*)> BodyGenCB,
+                 PrivatizeCallbackTy PrivCB,
+                 FinalizeCallbackTy FiniCB,
+                 std::function<Value*(InsertPointTy)> DistanceCB,
+                 bool isParallelSPMD,
+                 Value *SimdLen,
+                 Value *SimdSafeLen);
+
 
 
   /// Generator for '#omp parallel'

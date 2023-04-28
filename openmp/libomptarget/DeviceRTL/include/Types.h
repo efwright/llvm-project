@@ -150,7 +150,9 @@ using __kmpc_impl_lanemask_t = LaneMaskTy;
 
 using ParallelRegionFnTy = void *;
 using SimdRegionFnTy = void *;
+using LoopFnTy = void *;
 using SimdArgumentsTy = void**;
+using LoopArgumentsTy = void**;
 
 using CriticalNameTy = int32_t[8];
 
