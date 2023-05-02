@@ -1,0 +1,24 @@
+--- llvm/unittests/Frontend/OpenMPIRBuilderTest.cpp
++++ llvm/unittests/Frontend/OpenMPIRBuilderTest.cpp
+@@ -1081,7 +1019,20 @@
+ 
+   Type *Arg2Type = OutlinedFn->getArg(2)->getType();
+   EXPECT_TRUE(Arg2Type->isPointerTy());
+-  EXPECT_EQ(Arg2Type->getPointerElementType(), ArgStructTy);
++  EXPECT_EQ(Arg2Type->getPointerElementType(), I32Ty);
++
++  // Arguments that need to be passed through pointers and reloaded will get
++  // used earlier in the functions and therefore will appear first in the
++  // argument list after outlining.
++  Type *Arg3Type = OutlinedFn->getArg(3)->getType();
++  EXPECT_TRUE(Arg3Type->isPointerTy());
++  EXPECT_EQ(Arg3Type->getPointerElementType(), StructTy);
++
++  Type *Arg4Type = OutlinedFn->getArg(4)->getType();
++  EXPECT_EQ(Arg4Type, I32PtrTy);
++
++  Type *Arg5Type = OutlinedFn->getArg(5)->getType();
++  EXPECT_EQ(Arg5Type, StructPtrTy);
+ }
+ 
+ TEST_F(OpenMPIRBuilderTest, CanonicalLoopSimple) {

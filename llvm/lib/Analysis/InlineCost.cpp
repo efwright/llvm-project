@@ -2954,15 +2954,22 @@ InlineResult llvm::isInlineViable(Function &F) {
   bool ReturnsTwice = F.hasFnAttribute(Attribute::ReturnsTwice);
   for (BasicBlock &BB : F) {
     // Disallow inlining of functions which contain indirect branches.
-    if (isa<IndirectBrInst>(BB.getTerminator()))
+    if(!(BB.getTerminator())) {
+      llvm::dbgs() << "Found the error\n";
+      llvm::dbgs() << BB << "\n";
+      llvm::dbgs() << *(BB.getTerminator()) << "\n";
+    }
+    if (isa<IndirectBrInst>(BB.getTerminator())) {
       return InlineResult::failure("contains indirect branches");
+    }
 
     // Disallow inlining of blockaddresses which are used by non-callbr
     // instructions.
     if (BB.hasAddressTaken())
-      for (User *U : BlockAddress::get(&BB)->users())
+      for (User *U : BlockAddress::get(&BB)->users()) {
         if (!isa<CallBrInst>(*U))
           return InlineResult::failure("blockaddress used outside of callbr");
+      }
 
     for (auto &II : BB) {
       CallBase *Call = dyn_cast<CallBase>(&II);

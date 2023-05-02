@@ -647,18 +647,24 @@ bool CodeExtractor::isEligible() const {
 
 void CodeExtractor::findInputsOutputs(ValueSet &Inputs, ValueSet &Outputs,
                                       const ValueSet &SinkCands) const {
+  llvm::dbgs() << "findInputsOutputs\n";
   for (BasicBlock *BB : Blocks) {
     // If a used value is defined outside the region, it's an input.  If an
     // instruction is used outside the region, it's an output.
     for (Instruction &II : *BB) {
       for (auto &OI : II.operands()) {
         Value *V = OI;
-        if (!SinkCands.count(V) && definedInCaller(Blocks, V))
+        if (!SinkCands.count(V) && definedInCaller(Blocks, V)) {
           Inputs.insert(V);
+        }
       }
 
       for (User *U : II.users())
         if (!definedInRegion(Blocks, U)) {
+          //llvm::dbgs() << "    " << U->getParent() < "\n";
+          {
+            auto tmp = dyn_cast<Instruction>(U);
+          }
           Outputs.insert(&II);
           break;
         }
@@ -1361,6 +1367,7 @@ CallInst *CodeExtractor::emitCallAndSwitchStatement(Function *newFunction,
       Value *Idx[2];
       Idx[0] = Constant::getNullValue(Type::getInt32Ty(Context));
       Idx[1] = ConstantInt::get(Type::getInt32Ty(Context), aggIdx);
+
       GetElementPtrInst *GEP = GetElementPtrInst::Create(
           StructArgTy, &*AggOutputArgBegin, Idx, "gep_" + outputs[i]->getName(),
           InsertBefore);

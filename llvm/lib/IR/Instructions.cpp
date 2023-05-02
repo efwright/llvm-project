@@ -525,7 +525,6 @@ void CallInst::init(FunctionType *FTy, Value *Func, const Twine &NameStr) {
   this->FTy = FTy;
   assert(getNumOperands() == 1 && "NumOperands not set up?");
   setCalledOperand(Func);
-
   assert(FTy->getNumParams() == 0 && "Calling a function with bad signature");
 
   setName(NameStr);
