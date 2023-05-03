@@ -506,6 +506,14 @@ public:
   using BodyGenCallbackTy =
       function_ref<void(InsertPointTy AllocaIP, InsertPointTy CodeGenIP)>;
 
+  using LoopBodyCallbackTy =
+      function_ref<void(
+        InsertPointTy AllocaIP, InsertPointTy CodeGenIP, Value *IterationNum
+      )>;
+
+  using TripCountCallbackTy =
+      function_ref<Value*(InsertPointTy CodeGenIP)>;
+
   // This is created primarily for sections construct as llvm::function_ref
   // (BodyGenCallbackTy) is not storable (as described in the comments of
   // function_ref class - function_ref contains non-ownable reference
@@ -604,6 +612,15 @@ public:
                  FinalizeCallbackTy FiniCB, Value *IfCondition,
                  Value *NumThreads, omp::ProcBindKind ProcBind,
                  bool IsCancellable);
+
+  IRBuilder<>::InsertPoint
+  createSimdLoop(const LocationDescription &Loc, InsertPointTy AllocaIP,
+                 LoopBodyCallbackTy BodyGenCB,
+                 TripCountCallbackTy DistanceCB,
+                 PrivatizeCallbackTy PrivCB,
+                 FinalizeCallbackTy FiniCB,
+                 bool SPMDMode);
+
 
   /// Generator for the control flow structure of an OpenMP canonical loop.
   ///

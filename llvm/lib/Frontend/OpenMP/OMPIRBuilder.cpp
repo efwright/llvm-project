@@ -1230,6 +1230,21 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createParallel(
   return AfterIP;
 }
 
+
+IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
+  const LocationDescription &Loc, InsertPointTy AllocaIP,
+  LoopBodyCallbackTy BodyGenCB,
+  TripCountCallbackTy DistanceCB,
+  PrivatizeCallbackTy PrivCB,
+  FinalizeCallbackTy FiniCB,
+  bool SPMDMode
+)
+{
+
+  return AllocaIP;
+}
+
+
 void OpenMPIRBuilder::emitFlush(const LocationDescription &Loc) {
   // Build call void __kmpc_flush(ident_t *loc)
   uint32_t SrcLocStrSize;
