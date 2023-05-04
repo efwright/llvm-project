@@ -658,6 +658,19 @@ void __kmpc_for_static_fini(IdentTy *loc, int32_t global_tid) {
 void __kmpc_distribute_static_fini(IdentTy *loc, int32_t global_tid) {
   FunctionTracingRAII();
 }
+
+void __kmpc_simd_51(
+  IdentTy *ident, void *WorkFn, uint64_t TripCount,
+  void **Args, uint32_t nargs
+) {
+  FunctionTracingRAII();
+
+  ASSERT(WorkFn); 
+  for(uint64_t omp_iv = 0; omp_iv < TripCount; omp_iv++) {
+    ((void (*)(uint64_t, void**))WorkFn)(omp_iv, Args);
+  }
+  
+}
 }
 
 #pragma omp end declare target
