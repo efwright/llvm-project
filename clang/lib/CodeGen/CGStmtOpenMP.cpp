@@ -2716,7 +2716,114 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
       OMPLexicalScope Scope(*this, S, OMPD_unknown);
       CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_simd,
                                                   CodeGenIRBuilder);
-    }
+    } 
+
+    auto *CS = dyn_cast<CapturedStmt>(S.getAssociatedStmt());
+    auto *CL = dyn_cast<OMPCanonicalLoop>(CS->getCapturedStmt());
+    CGCapturedStmtInfo CGSI(*CS, CR_OpenMP);
+    CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(*this, &CGSI);
+    llvm::OpenMPIRBuilder::InsertPointTy AllocaIP(
+      AllocaInsertPt->getParent(), AllocaInsertPt->getIterator());
+
+    const auto *For = dyn_cast<ForStmt>(CL->getLoopStmt());
+    const Stmt *InitStmt = For->getInit();
+    EmitStmt(InitStmt);
+    const DeclRefExpr *LoopVarRef = CL->getLoopVarRef();
+    LValue LCVal = EmitLValue(LoopVarRef);
+    Address LoopVarAddress = LCVal.getAddress(*this);
+    llvm::AllocaInst *LoopVar = dyn_cast<llvm::AllocaInst>(LoopVarAddress.getPointer());
+
+    llvm::OpenMPIRBuilder &OMPBuilder = CGM.getOpenMPRuntime().getOMPBuilder();
+
+    using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
+
+    // FIXME check if trip count is signed
+    auto DistanceCB = [this, CL, LoopVar](InsertPointTy CodeGenIP, llvm::Value *&TripCount, bool &Signed) -> void {
+      Builder.restoreIP(CodeGenIP);
+
+      const CapturedStmt *DistanceFunc = CL->getDistanceFunc();
+      EmittedClosureTy DistanceClosure = emitCapturedStmtFunc(*this, DistanceFunc);
+
+
+      QualType LogicalTy = DistanceFunc->getCapturedDecl()
+                           ->getParam(0)
+                           ->getType()
+                           .getNonReferenceType();
+      Address CountAddr = CreateMemTemp(LogicalTy, ".count.addr");
+      emitCapturedStmtCall(*this, DistanceClosure, {CountAddr.getPointer()});
+      TripCount = Builder.CreateLoad(CountAddr, ".count");
+
+      return;
+    };
+
+    auto FiniCB = [this](InsertPointTy IP) {
+      OMPBuilderCBHelpers::FinalizeOMPRegion(*this, IP);
+    };
+
+    auto PrivCB = [](InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
+                     llvm::Value &, llvm::Value &Val, llvm::Value *&ReplVal) {
+      ReplVal = &Val;
+      return CodeGenIP;
+    };
+
+    const Stmt *loopBody = S.getBody();
+    auto BodyGenCB = [loopBody, this, CL, LoopVar, &S]
+                     (InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
+                      /*llvm::BasicBlock &ContinuationBB,*/
+                      llvm::Value *Virtual) {
+      //OMPBuilderCBHelpers::OutlinedRegionBodyRAII ORB(*this, AllocaIP,
+      //                                                ContinuationBB);
+
+      llvm::BasicBlock *CodeGenIPBB = CodeGenIP.getBlock();
+      //Builder.restoreIP(CodeGenIP);
+
+      //OMPPrivateScope PrivateScope(*this);
+      //(void)EmitOMPFirstprivateClause(S, PrivateScope);
+      //EmitOMPPrivateClause(S, PrivateScope);
+      //(void)PrivateScope.Privatize();
+
+      //OMPBuilderCBHelpers::EmitOMPRegionBody(*this, loopBody,
+      //                                       CodeGenIP, ContinuationBB);
+
+      OMPBuilderCBHelpers::EmitOMPOutlinedRegionBody(
+          *this,
+          loopBody, //ParallelRegionBodyStmt,
+          AllocaIP,
+          CodeGenIP,
+          "simd");
+
+      Builder.restoreIP(AllocaIP);
+      llvm::AllocaInst *NewLoopVar =
+            Builder.CreateAlloca(LoopVar->getAllocatedType(), LoopVar->getAddressSpace(),
+                                 LoopVar->getArraySize(), LoopVar->getName()+".loopvar");
+
+      for(llvm::User *U : LoopVar->users()) {
+        if(auto I = dyn_cast<llvm::Instruction>(U)) {
+          if(I->getParent() == CodeGenIPBB) {
+            U->replaceUsesOfWith(LoopVar, NewLoopVar);
+          }
+        }
+      }
+
+      const CapturedStmt *LoopVarFunc = CL->getLoopVarFunc();
+      EmittedClosureTy LoopVarClosure = emitCapturedStmtFunc(*this, LoopVarFunc);
+      Builder.SetInsertPoint(CodeGenIPBB, CodeGenIPBB->begin());
+      emitCapturedStmtCall(*this, LoopVarClosure,
+                           {NewLoopVar, Virtual});
+
+    };
+
+    Builder.restoreIP(
+      OMPBuilder.createSimdLoop(
+        Builder,
+        AllocaIP,
+        BodyGenCB,
+        DistanceCB,
+        PrivCB,
+        FiniCB,
+        /*SPMD*/ true
+    ));
+
     return;
   }
 
