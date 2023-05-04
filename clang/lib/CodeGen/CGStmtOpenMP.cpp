@@ -2664,59 +2664,60 @@ GetAlignedMapping(const OMPSimdDirective &S, CodeGenFunction &CGF) {
 }
 
 void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
-  bool UseOMPIRBuilder =
-      CGM.getLangOpts().OpenMPIRBuilder && isSupportedByOpenMPIRBuilder(S);
+  //bool UseOMPIRBuilder =
+  //    CGM.getLangOpts().OpenMPIRBuilder && isSupportedByOpenMPIRBuilder(S);
+  bool UseOMPIRBuilder = CGM.getLangOpts().OpenMPIsDevice;
   if (UseOMPIRBuilder) {
-    auto &&CodeGenIRBuilder = [this, &S, UseOMPIRBuilder](CodeGenFunction &CGF,
-                                                          PrePostActionTy &) {
-      // Use the OpenMPIRBuilder if enabled.
-      if (UseOMPIRBuilder) {
-        llvm::MapVector<llvm::Value *, llvm::Value *> AlignedVars =
-            GetAlignedMapping(S, CGF);
-        // Emit the associated statement and get its loop representation.
-        const Stmt *Inner = S.getRawStmt();
-        llvm::CanonicalLoopInfo *CLI =
-            EmitOMPCollapsedCanonicalLoopNest(Inner, 1);
+    //auto &&CodeGenIRBuilder = [this, &S, UseOMPIRBuilder](CodeGenFunction &CGF,
+    //                                                      PrePostActionTy &) {
+    //  // Use the OpenMPIRBuilder if enabled.
+    //  if (UseOMPIRBuilder) {
+    //    llvm::MapVector<llvm::Value *, llvm::Value *> AlignedVars =
+    //        GetAlignedMapping(S, CGF);
+    //    // Emit the associated statement and get its loop representation.
+    //    const Stmt *Inner = S.getRawStmt();
+    //    llvm::CanonicalLoopInfo *CLI =
+    //        EmitOMPCollapsedCanonicalLoopNest(Inner, 1);
 
-        llvm::OpenMPIRBuilder &OMPBuilder =
-            CGM.getOpenMPRuntime().getOMPBuilder();
-        // Add SIMD specific metadata
-        llvm::ConstantInt *Simdlen = nullptr;
-        if (const auto *C = S.getSingleClause<OMPSimdlenClause>()) {
-          RValue Len =
-              this->EmitAnyExpr(C->getSimdlen(), AggValueSlot::ignored(),
-                                /*ignoreResult=*/true);
-          auto *Val = cast<llvm::ConstantInt>(Len.getScalarVal());
-          Simdlen = Val;
-        }
-        llvm::ConstantInt *Safelen = nullptr;
-        if (const auto *C = S.getSingleClause<OMPSafelenClause>()) {
-          RValue Len =
-              this->EmitAnyExpr(C->getSafelen(), AggValueSlot::ignored(),
-                                /*ignoreResult=*/true);
-          auto *Val = cast<llvm::ConstantInt>(Len.getScalarVal());
-          Safelen = Val;
-        }
-        llvm::omp::OrderKind Order = llvm::omp::OrderKind::OMP_ORDER_unknown;
-        if (const auto *C = S.getSingleClause<OMPOrderClause>()) {
-          if (C->getKind() == OpenMPOrderClauseKind ::OMPC_ORDER_concurrent) {
-            Order = llvm::omp::OrderKind::OMP_ORDER_concurrent;
-          }
-        }
-        // Add simd metadata to the collapsed loop. Do not generate
-        // another loop for if clause. Support for if clause is done earlier.
-        OMPBuilder.applySimd(CLI, AlignedVars,
-                             /*IfCond*/ nullptr, Order, Simdlen, Safelen);
-        return;
-      }
-    };
-    {
-      auto LPCRegion =
-          CGOpenMPRuntime::LastprivateConditionalRAII::disable(*this, S);
-      OMPLexicalScope Scope(*this, S, OMPD_unknown);
-      CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_simd,
-                                                  CodeGenIRBuilder);
-    } 
+    //    llvm::OpenMPIRBuilder &OMPBuilder =
+    //        CGM.getOpenMPRuntime().getOMPBuilder();
+    //    // Add SIMD specific metadata
+    //    llvm::ConstantInt *Simdlen = nullptr;
+    //    if (const auto *C = S.getSingleClause<OMPSimdlenClause>()) {
+    //      RValue Len =
+    //          this->EmitAnyExpr(C->getSimdlen(), AggValueSlot::ignored(),
+    //                            /*ignoreResult=*/true);
+    //      auto *Val = cast<llvm::ConstantInt>(Len.getScalarVal());
+    //      Simdlen = Val;
+    //    }
+    //    llvm::ConstantInt *Safelen = nullptr;
+    //    if (const auto *C = S.getSingleClause<OMPSafelenClause>()) {
+    //      RValue Len =
+    //          this->EmitAnyExpr(C->getSafelen(), AggValueSlot::ignored(),
+    //                            /*ignoreResult=*/true);
+    //      auto *Val = cast<llvm::ConstantInt>(Len.getScalarVal());
+    //      Safelen = Val;
+    //    }
+    //    llvm::omp::OrderKind Order = llvm::omp::OrderKind::OMP_ORDER_unknown;
+    //    if (const auto *C = S.getSingleClause<OMPOrderClause>()) {
+    //      if (C->getKind() == OpenMPOrderClauseKind ::OMPC_ORDER_concurrent) {
+    //        Order = llvm::omp::OrderKind::OMP_ORDER_concurrent;
+    //      }
+    //    }
+    //    // Add simd metadata to the collapsed loop. Do not generate
+    //    // another loop for if clause. Support for if clause is done earlier.
+    //    OMPBuilder.applySimd(CLI, AlignedVars,
+    //                         /*IfCond*/ nullptr, Order, Simdlen, Safelen);
+    //    return;
+    //  }
+    //};
+    //{
+    //  auto LPCRegion =
+    //      CGOpenMPRuntime::LastprivateConditionalRAII::disable(*this, S);
+    //  OMPLexicalScope Scope(*this, S, OMPD_unknown);
+    //  CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_simd,
+    //                                              CodeGenIRBuilder);
+    //} 
 
     auto *CS = dyn_cast<CapturedStmt>(S.getAssociatedStmt());
     auto *CL = dyn_cast<OMPCanonicalLoop>(CS->getCapturedStmt());
