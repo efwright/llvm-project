@@ -512,7 +512,9 @@ public:
       )>;
 
   using TripCountCallbackTy =
-      function_ref<Value*(InsertPointTy CodeGenIP)>;
+      function_ref<
+        Value*(InsertPointTy CodeGenIP, Value *&TripCount, bool &Signed)
+      >;
 
   // This is created primarily for sections construct as llvm::function_ref
   // (BodyGenCallbackTy) is not storable (as described in the comments of
