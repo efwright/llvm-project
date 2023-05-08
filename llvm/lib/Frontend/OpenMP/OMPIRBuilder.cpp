@@ -454,6 +454,8 @@ void OpenMPIRBuilder::finalize(Function *Fn) {
   for (OutlineInfo &OI : OutlineInfos) {
     // Skip functions that have not finalized yet; may happen with nested
     // function generation.
+    
+dbgs() << "Outlining\n";
     if (Fn && OI.getFunction() != Fn) {
       DeferredOutlines.push_back(OI);
       continue;
@@ -462,9 +464,10 @@ void OpenMPIRBuilder::finalize(Function *Fn) {
     ParallelRegionBlockSet.clear();
     Blocks.clear();
     OI.collectBlocks(ParallelRegionBlockSet, Blocks);
-
+dbgs() << "Blocks collected\n";
     Function *OuterFn = OI.getFunction();
     CodeExtractorAnalysisCache CEAC(*OuterFn);
+dbgs() << "1\n";
     CodeExtractor Extractor(Blocks, /* DominatorTree */ nullptr,
                             /* AggregateArgs */ true,
                             /* BlockFrequencyInfo */ nullptr,
@@ -474,6 +477,7 @@ void OpenMPIRBuilder::finalize(Function *Fn) {
                             /* AllowAlloca */ true,
                             /* AllocaBlock*/ OI.OuterAllocaBB,
                             /* Suffix */ ".omp_par");
+dbgs() << "2\n";
 
     LLVM_DEBUG(dbgs() << "Before     outlining: " << *OuterFn << "\n");
     LLVM_DEBUG(dbgs() << "Entry " << OI.EntryBB->getName()
@@ -483,9 +487,9 @@ void OpenMPIRBuilder::finalize(Function *Fn) {
 
     for (auto *V : OI.ExcludeArgsFromAggregate)
       Extractor.excludeArgFromAggregate(V);
-
+dbgs() << "Exclude args\n";
     Function *OutlinedFn = Extractor.extractCodeRegion(CEAC);
-
+dbgs() << "Extract code region\n";
     LLVM_DEBUG(dbgs() << "After      outlining: " << *OuterFn << "\n");
     LLVM_DEBUG(dbgs() << "   Outlined function: " << *OutlinedFn << "\n");
     assert(OutlinedFn->getReturnType()->isVoidTy() &&
@@ -1253,7 +1257,7 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
   BasicBlock *InsertBB = Builder.GetInsertBlock();
   Function *OuterFn = InsertBB->getParent();
 
-  LLVM_DEBUG(dbgs() << "At the start of createSimdLoop: " << *OuterFn << "\n");
+  dbgs() << "At the start of createSimdLoop: " << *OuterFn << "\n";
 
   // Save the outer alloca block because the insertion iterator may get
   // invalidated and we still need this later.
@@ -1315,8 +1319,9 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
   // it to 0.
   if(!DistValType->isIntegerTy(64)) {
     Builder.SetInsertPoint(LRegDistanceBB->getTerminator());
+llvm::dbgs() << "Cast: " << *DistVal << " " << *Int64 << " " << IsTripCountSigned << "\n";
     DistVal = Builder.CreateIntCast(
-     DistVal, Int64, IsTripCountSigned, DistVal->getName()+".casted");
+     DistVal, Int64, /*IsTripCountSigned*/ false, DistVal->getName()+".casted");
   }
 
   LLVM_DEBUG(dbgs() << "After DistanceCB: " << *LRegDistanceBB << "\n");
@@ -1486,6 +1491,9 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
 
   int NumInputs = Inputs.size()-1; // One argument is always omp.iv
   OI.PostOutlineCB = [=](Function &OutlinedFn) {
+    dbgs() << "SIMD post outline\n";
+
+
     OutlinedFn.addFnAttr(Attribute::NoUnwind);
     OutlinedFn.addFnAttr(Attribute::NoRecurse);
 

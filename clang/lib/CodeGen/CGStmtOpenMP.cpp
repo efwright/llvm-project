@@ -2668,6 +2668,9 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
   //    CGM.getLangOpts().OpenMPIRBuilder && isSupportedByOpenMPIRBuilder(S);
   bool UseOMPIRBuilder = CGM.getLangOpts().OpenMPIsDevice;
   if (UseOMPIRBuilder) {
+
+    llvm::dbgs() << "EmitOMPSimdDirective GPU\n";
+    S.dump();
     //auto &&CodeGenIRBuilder = [this, &S, UseOMPIRBuilder](CodeGenFunction &CGF,
     //                                                      PrePostActionTy &) {
     //  // Use the OpenMPIRBuilder if enabled.
@@ -2722,9 +2725,14 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
     auto *CS = dyn_cast<CapturedStmt>(S.getAssociatedStmt());
     auto *CL = dyn_cast<OMPCanonicalLoop>(CS->getCapturedStmt());
     CGCapturedStmtInfo CGSI(*CS, CR_OpenMP);
+
+llvm::dbgs() << "1\n";
+
     CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(*this, &CGSI);
     llvm::OpenMPIRBuilder::InsertPointTy AllocaIP(
       AllocaInsertPt->getParent(), AllocaInsertPt->getIterator());
+
+llvm::dbgs() << "2\n";
 
     const auto *For = dyn_cast<ForStmt>(CL->getLoopStmt());
     const Stmt *InitStmt = For->getInit();
@@ -2733,6 +2741,8 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
     LValue LCVal = EmitLValue(LoopVarRef);
     Address LoopVarAddress = LCVal.getAddress(*this);
     llvm::AllocaInst *LoopVar = dyn_cast<llvm::AllocaInst>(LoopVarAddress.getPointer());
+
+llvm::dbgs() << "3\n";
 
     llvm::OpenMPIRBuilder &OMPBuilder = CGM.getOpenMPRuntime().getOMPBuilder();
 
@@ -2814,6 +2824,8 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
 
     };
 
+llvm::dbgs() << "4\n";
+
     Builder.restoreIP(
       OMPBuilder.createSimdLoop(
         Builder,
@@ -2824,6 +2836,8 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
         FiniCB,
         /*SPMD*/ true
     ));
+
+llvm::dbgs() << "5\n";
 
     return;
   }
