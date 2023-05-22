@@ -835,6 +835,8 @@ Error CUDAKernelTy::launchImpl(GenericDeviceTy &GenericDevice,
                                AsyncInfoWrapperTy &AsyncInfoWrapper) const {
   CUDADeviceTy &CUDADevice = static_cast<CUDADeviceTy &>(GenericDevice);
 
+printf("CUDA LAUNCH\n");
+
   CUstream Stream = CUDADevice.getStream(AsyncInfoWrapper);
   if (!Stream)
     return Plugin::error("Failure to get stream");
@@ -847,6 +849,10 @@ Error CUDAKernelTy::launchImpl(GenericDeviceTy &GenericDevice,
                      /* gridDimZ */ 1, NumThreads,
                      /* blockDimY */ 1, /* blockDimZ */ 1, MaxDynCGroupMem,
                      Stream, (void **)Args, nullptr);
+
+  //Plugin::check(cuStreamSynchronize(Stream), "Error in stream synchronize for '%s': %s", getName());
+  //cuStreamSynchronize(Stream);
+
   return Plugin::check(Res, "Error in cuLaunchKernel for '%s': %s", getName());
 }
 

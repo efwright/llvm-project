@@ -529,6 +529,10 @@ struct GenericDeviceTy : public DeviceAllocatorTy {
   /// Register the offload entries for a specific image on the device.
   Error registerOffloadEntries(DeviceImageTy &Image);
 
+  /// Force a synchronization if the 'LIBOMPTARGET_FORCE_SYNCHRONIZE"
+  /// environment variable is set.
+  Error forceSynchronize(__tgt_async_info *AsyncInfo);
+
   /// Synchronize the current thread with the pending operations on the
   /// __tgt_async_info structure.
   Error synchronize(__tgt_async_info *AsyncInfo);
