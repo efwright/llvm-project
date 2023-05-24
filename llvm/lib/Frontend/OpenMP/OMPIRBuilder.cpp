@@ -477,16 +477,19 @@ dbgs() << "1\n";
                             /* AllowAlloca */ true,
                             /* AllocaBlock*/ OI.OuterAllocaBB,
                             /* Suffix */ ".omp_par");
-dbgs() << "2\n";
+dbgs() << "2!!!!\n";
 
     LLVM_DEBUG(dbgs() << "Before     outlining: " << *OuterFn << "\n");
     LLVM_DEBUG(dbgs() << "Entry " << OI.EntryBB->getName()
                       << " Exit: " << OI.ExitBB->getName() << "\n");
     assert(Extractor.isEligible() &&
            "Expected OpenMP outlining to be possible!");
+dbgs() << "2.5?\n";
 
-    for (auto *V : OI.ExcludeArgsFromAggregate)
+    for (auto *V : OI.ExcludeArgsFromAggregate) {
+      dbgs() << "exlcuding " << *V << "\n";
       Extractor.excludeArgFromAggregate(V);
+    }
 dbgs() << "Exclude args\n";
     Function *OutlinedFn = Extractor.extractCodeRegion(CEAC);
 dbgs() << "Extract code region\n";
@@ -1385,6 +1388,7 @@ llvm::dbgs() << "Cast: " << *DistVal << " " << *Int64 << " " << IsTripCountSigne
   InsertPointTy PreFiniIP(PRegPreFiniBB, PRegPreFiniTI->getIterator());
   FiniCB(PreFiniIP);
 
+  OI.OuterAllocaBB = OuterAllocaBlock;
   OI.EntryBB = PRegEntryBB;
   OI.ExitBB = PRegExitBB;
 
