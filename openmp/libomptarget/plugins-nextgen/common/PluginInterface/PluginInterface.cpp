@@ -215,8 +215,6 @@ void AsyncInfoWrapperTy::finalize(Error &Err) {
   if (AsyncInfoPtr == &LocalAsyncInfo && LocalAsyncInfo.Queue && !Err)
     Err = Device.synchronize(&LocalAsyncInfo);
 
-printf("ASYNCINFO\n");
-
   // Invalidate the wrapper object.
   AsyncInfoPtr = nullptr;
 }
@@ -249,26 +247,23 @@ Error GenericKernelTy::printLaunchInfoDetails(GenericDeviceTy &GenericDevice,
   return Plugin::success();
 }
 
-Error GenericDeviceTy::forceSynchronize(__tgt_async_info *AsyncInfo)
+void GenericDeviceTy::checkForForceSynchronize(__tgt_async_info *AsyncInfo)
 {
-  if(const char* ForceSynchronizeEnvVar = std::getenv("LIBOMPTARGET_FORCE_SYNCHRONIZE"))
+  if(std::getenv("LIBOMPTARGET_FORCE_SYNCHRONIZE"))
   {
-    auto SyncErr = synchronize(AsyncInfo);
-    //auto SyncErr = synchronizeImpl(*AsyncInfo);
-
-    if (SyncErr) {
-      return SyncErr;
+    if(AsyncInfo) {
+      auto SyncErr = synchronize(AsyncInfo);
+      if (SyncErr) {
+        REPORT("Failure to synchronize stream %p: %s\n", AsyncInfo->Queue,
+          toString(std::move(SyncErr)).data());
+      }
     }
   }
-  return Plugin::success();
 }
-
 
 Error GenericKernelTy::launch(GenericDeviceTy &GenericDevice, void **ArgPtrs,
                               ptrdiff_t *ArgOffsets, KernelArgsTy &KernelArgs,
                               AsyncInfoWrapperTy &AsyncInfoWrapper) const {
-  printf("!!!!!!!!! LAUNCHING!\n");
-
   llvm::SmallVector<void *, 16> Args;
   llvm::SmallVector<void *, 16> Ptrs;
 
@@ -945,7 +940,7 @@ Error GenericDeviceTy::dataSubmit(void *TgtPtr, const void *HstPtr,
   AsyncInfoWrapperTy AsyncInfoWrapper(*this, AsyncInfo);
 
   auto Err = dataSubmitImpl(TgtPtr, HstPtr, Size, AsyncInfoWrapper);
-  auto SyncErr = forceSynchronize(AsyncInfo);
+  checkForForceSynchronize(AsyncInfo);
 
 
   AsyncInfoWrapper.finalize(Err);
@@ -957,7 +952,7 @@ Error GenericDeviceTy::dataRetrieve(void *HstPtr, const void *TgtPtr,
   AsyncInfoWrapperTy AsyncInfoWrapper(*this, AsyncInfo);
 
   auto Err = dataRetrieveImpl(HstPtr, TgtPtr, Size, AsyncInfoWrapper);
-  auto SyncErr = forceSynchronize(AsyncInfo);
+  checkForForceSynchronize(AsyncInfo);
 
   AsyncInfoWrapper.finalize(Err);
   return Err;
@@ -969,7 +964,7 @@ Error GenericDeviceTy::dataExchange(const void *SrcPtr, GenericDeviceTy &DstDev,
   AsyncInfoWrapperTy AsyncInfoWrapper(*this, AsyncInfo);
 
   auto Err = dataExchangeImpl(SrcPtr, DstDev, DstPtr, Size, AsyncInfoWrapper);
-  auto SyncErr = forceSynchronize(AsyncInfo);
+  checkForForceSynchronize(AsyncInfo);
 
   AsyncInfoWrapper.finalize(Err);
   return Err;
@@ -990,17 +985,14 @@ Error GenericDeviceTy::launchKernel(void *EntryPtr, void **ArgPtrs,
         KernelArgs.NumTeams[0], KernelArgs.ThreadLimit[0], KernelArgs.Tripcount,
         AsyncInfoWrapper);
 
-printf("CommonInterface GenericDeviceTy::launchKernel\n");
-
   auto Err = GenericKernel.launch(*this, ArgPtrs, ArgOffsets, KernelArgs,
                                   AsyncInfoWrapper);
-  auto SyncErr = forceSynchronize(AsyncInfo);
+  checkForForceSynchronize(AsyncInfo);
 
   if (RecordReplay.isRecordingOrReplaying() &&
       RecordReplay.isSaveOutputEnabled())
     RecordReplay.saveKernelOutputInfo(GenericKernel.getName(),
                                       AsyncInfoWrapper);
-printf("Before finalize\n");
 
   AsyncInfoWrapper.finalize(Err);
   return Err;
@@ -1404,7 +1396,6 @@ int32_t __tgt_rtl_launch_kernel(int32_t DeviceId, void *TgtEntryPtr,
                                 void **TgtArgs, ptrdiff_t *TgtOffsets,
                                 KernelArgsTy *KernelArgs,
                                 __tgt_async_info *AsyncInfoPtr) {
-printf("Common launch kernel\n");
   auto Err = Plugin::get().getDevice(DeviceId).launchKernel(
       TgtEntryPtr, TgtArgs, TgtOffsets, *KernelArgs, AsyncInfoPtr);
   if (Err) {

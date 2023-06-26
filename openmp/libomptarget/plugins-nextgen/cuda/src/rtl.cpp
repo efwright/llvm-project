@@ -463,6 +463,7 @@ struct CUDADeviceTy : public GenericDeviceTy {
 
   /// Synchronize current thread with the pending operations on the async info.
   Error synchronizeImpl(__tgt_async_info &AsyncInfo) override {
+
     CUstream Stream = reinterpret_cast<CUstream>(AsyncInfo.Queue);
     CUresult Res = cuStreamSynchronize(Stream);
 
@@ -834,8 +835,6 @@ Error CUDAKernelTy::launchImpl(GenericDeviceTy &GenericDevice,
                                KernelArgsTy &KernelArgs, void *Args,
                                AsyncInfoWrapperTy &AsyncInfoWrapper) const {
   CUDADeviceTy &CUDADevice = static_cast<CUDADeviceTy &>(GenericDevice);
-
-printf("CUDA LAUNCH\n");
 
   CUstream Stream = CUDADevice.getStream(AsyncInfoWrapper);
   if (!Stream)

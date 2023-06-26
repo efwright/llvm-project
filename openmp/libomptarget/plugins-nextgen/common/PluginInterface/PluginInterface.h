@@ -531,7 +531,8 @@ struct GenericDeviceTy : public DeviceAllocatorTy {
 
   /// Force a synchronization if the 'LIBOMPTARGET_FORCE_SYNCHRONIZE"
   /// environment variable is set.
-  Error forceSynchronize(__tgt_async_info *AsyncInfo);
+  //Error forceSynchronize(__tgt_async_info *AsyncInfo);
+  void checkForForceSynchronize(__tgt_async_info *AsyncInfo);
 
   /// Synchronize the current thread with the pending operations on the
   /// __tgt_async_info structure.
