@@ -124,6 +124,8 @@ __OMP_FUNCTION_TYPE(ShuffleReduce, false, Void, VoidPtr, Int16, Int16, Int16)
 __OMP_FUNCTION_TYPE(InterWarpCopy, false, Void, VoidPtr, Int32)
 __OMP_FUNCTION_TYPE(GlobalList, false, Void, VoidPtr, Int32, VoidPtr)
 
+__OMP_FUNCTION_TYPE(LoopTask, false, Void, Int64, VoidPtrPtr)
+
 #undef __OMP_FUNCTION_TYPE
 #undef OMP_FUNCTION_TYPE
 
@@ -490,6 +492,11 @@ __OMP_RTL(__kmpc_barrier_simple_generic, false, Void, IdentPtr, Int32)
 
 __OMP_RTL(__kmpc_warp_active_thread_mask, false, Int64,)
 __OMP_RTL(__kmpc_syncwarp, false, Void, Int64)
+
+__OMP_RTL(__kmpc_simd_4, false, Void, IdentPtr, LoopTaskPtr, Int32, VoidPtrPtr, Int32)
+__OMP_RTL(__kmpc_simd_4u, false, Void, IdentPtr, LoopTaskPtr, Int32, VoidPtrPtr, Int32)
+__OMP_RTL(__kmpc_simd_8, false, Void, IdentPtr, LoopTaskPtr, Int64, VoidPtrPtr, Int32)
+__OMP_RTL(__kmpc_simd_8u, false, Void, IdentPtr, LoopTaskPtr, Int64, VoidPtrPtr, Int32)
 
 __OMP_RTL(__last, false, Void, )
 

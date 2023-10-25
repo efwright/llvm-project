@@ -2667,61 +2667,103 @@ GetAlignedMapping(const OMPSimdDirective &S, CodeGenFunction &CGF) {
 }
 
 void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
-  bool UseOMPIRBuilder =
-      CGM.getLangOpts().OpenMPIRBuilder && isSupportedByOpenMPIRBuilder(S);
-  if (UseOMPIRBuilder) {
-    auto &&CodeGenIRBuilder = [this, &S, UseOMPIRBuilder](CodeGenFunction &CGF,
-                                                          PrePostActionTy &) {
-      // Use the OpenMPIRBuilder if enabled.
-      if (UseOMPIRBuilder) {
-        llvm::MapVector<llvm::Value *, llvm::Value *> AlignedVars =
-            GetAlignedMapping(S, CGF);
-        // Emit the associated statement and get its loop representation.
-        const Stmt *Inner = S.getRawStmt();
-        llvm::CanonicalLoopInfo *CLI =
-            EmitOMPCollapsedCanonicalLoopNest(Inner, 1);
+  bool UseOMPIRBuilder = CGM.getLangOpts().OpenMPIsTargetDevice;
+  if(UseOMPIRBuilder) {
+    auto *CS = dyn_cast<CapturedStmt>(S.getAssociatedStmt());
+    auto *CL = dyn_cast<OMPCanonicalLoop>(CS->getCapturedStmt());
+    CGCapturedStmtInfo CGSI(*CS, CR_OpenMP);
 
-        llvm::OpenMPIRBuilder &OMPBuilder =
-            CGM.getOpenMPRuntime().getOMPBuilder();
-        // Add SIMD specific metadata
-        llvm::ConstantInt *Simdlen = nullptr;
-        if (const auto *C = S.getSingleClause<OMPSimdlenClause>()) {
-          RValue Len =
-              this->EmitAnyExpr(C->getSimdlen(), AggValueSlot::ignored(),
-                                /*ignoreResult=*/true);
-          auto *Val = cast<llvm::ConstantInt>(Len.getScalarVal());
-          Simdlen = Val;
-        }
-        llvm::ConstantInt *Safelen = nullptr;
-        if (const auto *C = S.getSingleClause<OMPSafelenClause>()) {
-          RValue Len =
-              this->EmitAnyExpr(C->getSafelen(), AggValueSlot::ignored(),
-                                /*ignoreResult=*/true);
-          auto *Val = cast<llvm::ConstantInt>(Len.getScalarVal());
-          Safelen = Val;
-        }
-        llvm::omp::OrderKind Order = llvm::omp::OrderKind::OMP_ORDER_unknown;
-        if (const auto *C = S.getSingleClause<OMPOrderClause>()) {
-          if (C->getKind() == OpenMPOrderClauseKind ::OMPC_ORDER_concurrent) {
-            Order = llvm::omp::OrderKind::OMP_ORDER_concurrent;
+    CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(*this, &CGSI);
+    llvm::OpenMPIRBuilder::InsertPointTy AllocaIP(
+      AllocaInsertPt->getParent(), AllocaInsertPt->getIterator());
+
+    const auto *For = dyn_cast<ForStmt>(CL->getLoopStmt());
+    if(const Stmt *InitStmt = For->getInit())
+      EmitStmt(InitStmt);
+    const DeclRefExpr *LoopVarRef = CL->getLoopVarRef();
+    LValue LCVal = EmitLValue(LoopVarRef);
+    Address LoopVarAddress = LCVal.getAddress(*this);
+    llvm::AllocaInst *LoopVar = dyn_cast<llvm::AllocaInst>(LoopVarAddress.getPointer());
+
+    llvm::OpenMPIRBuilder &OMPBuilder = CGM.getOpenMPRuntime().getOMPBuilder();
+
+    using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
+
+    // FIXME check if trip count is signed
+    auto DistanceCB = [this, CL, LoopVar](InsertPointTy CodeGenIP, llvm::Value *&TripCount, bool &Signed) -> void {
+      Builder.restoreIP(CodeGenIP);
+
+      const CapturedStmt *DistanceFunc = CL->getDistanceFunc();
+      EmittedClosureTy DistanceClosure = emitCapturedStmtFunc(*this, DistanceFunc);
+
+      QualType LogicalTy = DistanceFunc->getCapturedDecl()
+                           ->getParam(0)
+                           ->getType()
+                           .getNonReferenceType();
+      Address CountAddr = CreateMemTemp(LogicalTy, ".count.addr");
+      emitCapturedStmtCall(*this, DistanceClosure, {CountAddr.getPointer()});
+      TripCount = Builder.CreateLoad(CountAddr, ".count");
+
+      return;
+    };
+
+    auto FiniCB = [this](InsertPointTy IP) {
+      OMPBuilderCBHelpers::FinalizeOMPRegion(*this, IP);
+    };
+
+    auto PrivCB = [](InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
+                     llvm::Value &, llvm::Value &Val, llvm::Value *&ReplVal) {
+      ReplVal = &Val;
+      return CodeGenIP;
+    };
+
+    const Stmt *loopBody = S.getBody();
+    auto BodyGenCB = [loopBody, this, CL, LoopVar, &S]
+                     (InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
+                      llvm::Value *Virtual) {
+      llvm::BasicBlock *CodeGenIPBB = CodeGenIP.getBlock();
+
+      OMPBuilderCBHelpers::EmitOMPOutlinedRegionBody(
+          *this,
+          loopBody,
+          AllocaIP,
+          CodeGenIP,
+          "simd");
+
+      Builder.restoreIP(AllocaIP);
+      llvm::AllocaInst *NewLoopVar =
+            Builder.CreateAlloca(LoopVar->getAllocatedType(), LoopVar->getAddressSpace(),
+                                 LoopVar->getArraySize(), LoopVar->getName()+".loopvar");
+
+      for(llvm::User *U : LoopVar->users()) {
+        if(auto I = dyn_cast<llvm::Instruction>(U)) {
+          if(I->getParent() == CodeGenIPBB) {
+            U->replaceUsesOfWith(LoopVar, NewLoopVar);
           }
         }
-        // Add simd metadata to the collapsed loop. Do not generate
-        // another loop for if clause. Support for if clause is done earlier.
-        OMPBuilder.applySimd(CLI, AlignedVars,
-                             /*IfCond*/ nullptr, Order, Simdlen, Safelen);
-        return;
       }
+
+      const CapturedStmt *LoopVarFunc = CL->getLoopVarFunc();
+      EmittedClosureTy LoopVarClosure = emitCapturedStmtFunc(*this, LoopVarFunc);
+      Builder.SetInsertPoint(CodeGenIPBB, CodeGenIPBB->begin());
+      emitCapturedStmtCall(*this, LoopVarClosure,
+                           {NewLoopVar, Virtual});
+
     };
-    {
-      auto LPCRegion =
-          CGOpenMPRuntime::LastprivateConditionalRAII::disable(*this, S);
-      OMPLexicalScope Scope(*this, S, OMPD_unknown);
-      CGM.getOpenMPRuntime().emitInlinedDirective(*this, OMPD_simd,
-                                                  CodeGenIRBuilder);
-    }
+
+    Builder.restoreIP(
+      OMPBuilder.createSimdLoop(
+        Builder,
+        AllocaIP,
+        BodyGenCB,
+        DistanceCB,
+        PrivCB,
+        FiniCB,
+        /*SPMD*/ true
+    ));
+
     return;
-  }
+  } 
 
   ParentLoopDirectiveForScanRegion ScanRegion(*this, S);
   OMPFirstScanLoop = true;
