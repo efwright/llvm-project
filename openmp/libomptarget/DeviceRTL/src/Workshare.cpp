@@ -473,9 +473,7 @@ void SimdLoop(
   IdentTy *ident, void *WorkFn, IType TripCount,
   void **Args, uint32_t nargs
 ) {
-  FunctionTracingRAII();
-
-  ASSERT(WorkFn); 
+  ASSERT(WorkFn, "expected valid outlined function"); 
   for(IType omp_iv = 0; omp_iv < TripCount; omp_iv++) {
     ((void (*)(IType, void**))WorkFn)(omp_iv, Args);
   }
@@ -653,8 +651,6 @@ void __kmpc_simd_4(
   IdentTy *ident, void *WorkFn, int32_t TripCount,
   void **Args, uint32_t nargs
 ) {
-  FunctionTracingRAII();
-
   SimdLoop<int32_t>(ident, WorkFn, TripCount, Args, nargs);
 }
 
@@ -662,8 +658,6 @@ void __kmpc_simd_4u(
   IdentTy *ident, void *WorkFn, uint32_t TripCount,
   void **Args, uint32_t nargs
 ) {
-  FunctionTracingRAII();
-
   SimdLoop<uint32_t>(ident, WorkFn, TripCount, Args, nargs);
 }
 
@@ -671,8 +665,6 @@ void __kmpc_simd_8(
   IdentTy *ident, void *WorkFn, int64_t TripCount,
   void **Args, uint32_t nargs
 ) {
-  FunctionTracingRAII();
-
   SimdLoop<int64_t>(ident, WorkFn, TripCount, Args, nargs);
 }
 
@@ -680,8 +672,6 @@ void __kmpc_simd_8u(
   IdentTy *ident, void *WorkFn, uint64_t TripCount,
   void **Args, uint32_t nargs
 ) {
-  FunctionTracingRAII();
-
   SimdLoop<uint64_t>(ident, WorkFn, TripCount, Args, nargs);
 }
 
