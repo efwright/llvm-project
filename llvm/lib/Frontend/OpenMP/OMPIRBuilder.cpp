@@ -3155,7 +3155,7 @@ Function *OpenMPIRBuilder::createReductionFunction(
         RedArrayTy, RHSArrayPtr,
         {ConstantInt::get(IndexTy, 0), ConstantInt::get(IndexTy, En.index())});
     Value *RHSI8Ptr = Builder.CreateLoad(Builder.getPtrTy(), RHSI8PtrPtr);
-    Value *RHS = Builder.CreatePointerBitCastOrAddrSpaceCast(
+    Value *RHSPtr = Builder.CreatePointerBitCastOrAddrSpaceCast(
         RHSI8Ptr, RI.PrivateVariable->getType(),
         RHSI8Ptr->getName() + ".ascast");
 
@@ -3163,20 +3163,20 @@ Function *OpenMPIRBuilder::createReductionFunction(
         RedArrayTy, LHSArrayPtr,
         {ConstantInt::get(IndexTy, 0), ConstantInt::get(IndexTy, En.index())});
     Value *LHSI8Ptr = Builder.CreateLoad(Builder.getPtrTy(), LHSI8PtrPtr);
-    Value *LHS = Builder.CreatePointerBitCastOrAddrSpaceCast(
+    Value *LHSPtr = Builder.CreatePointerBitCastOrAddrSpaceCast(
         LHSI8Ptr, RI.Variable->getType(), LHSI8Ptr->getName() + ".ascast");
 
     if (ReductionGenCBTy == ReductionGenCBTy::Clang) {
-      LHSPtrs.emplace_back(LHS);
-      RHSPtrs.emplace_back(RHS);
+      LHSPtrs.emplace_back(LHSPtr);
+      RHSPtrs.emplace_back(RHSPtr);
     } else {
-      LHS = Builder.CreateLoad(RI.ElementType, LHS);
-      RHS = Builder.CreateLoad(RI.ElementType, RHS);
+      Value *LHS = Builder.CreateLoad(RI.ElementType, LHSPtr);
+      Value *RHS = Builder.CreateLoad(RI.ElementType, RHSPtr);
       Value *Reduced;
       RI.ReductionGen(Builder.saveIP(), LHS, RHS, Reduced);
       if (!Builder.GetInsertBlock())
         return ReductionFunc;
-      Builder.CreateStore(Reduced, LHS);
+      Builder.CreateStore(Reduced, LHSPtr);
     }
   }
 
@@ -3538,10 +3538,6 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductions(
     Builder.CreateUnreachable();
   }
 
-  // Populate the outlined reduction function using the elementwise reduction
-  // function. Partial values are extracted from the type-erased array of
-  // pointers to private variables.
-  // populateReductionFunction(ReductionFunc, ReductionInfos, Builder, false);
   Builder.SetInsertPoint(ContinuationBlock);
   return Builder.saveIP();
 }
