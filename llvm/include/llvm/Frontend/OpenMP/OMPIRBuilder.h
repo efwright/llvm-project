@@ -1572,7 +1572,6 @@ private:
   /// \return The reduction function.
   Function *createReductionFunction(
       StringRef ReducerName, ArrayRef<ReductionInfo> ReductionInfos,
-      bool IsGpu = false,
       ReductionGenCBTy ReductionGenCBTy = ReductionGenCBTy::MLIR,
       AttributeList FuncAttrs = {});
 
