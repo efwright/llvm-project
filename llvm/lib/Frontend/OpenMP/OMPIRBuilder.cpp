@@ -634,6 +634,9 @@ Function *OpenMPIRBuilder::getOrCreateRuntimeFunctionPtr(RuntimeFunction FnID) {
 void OpenMPIRBuilder::initialize() { initializeTypes(M); }
 
 void OpenMPIRBuilder::finalize(Function *Fn) {
+// ANCHOR 
+   llvm::dbgs () << "Starting finalize for function:\n" << *Fn << "\n";
+
   SmallPtrSet<BasicBlock *, 32> ParallelRegionBlockSet;
   SmallVector<BasicBlock *, 32> Blocks;
   SmallVector<OutlineInfo, 16> DeferredOutlines;
@@ -736,8 +739,12 @@ void OpenMPIRBuilder::finalize(Function *Fn) {
               "OMPIRBuilder finalization \n";
   };
 
-  if (!OffloadInfoManager.empty())
+  if (!OffloadInfoManager.empty()) {
+// ANCHOR
+llvm::dbgs() << "createOffloadEntriesAndInfoMetadata - create metadata for functions containing offloaded target regions.\n";
     createOffloadEntriesAndInfoMetadata(ErrorReportFn);
+  }
+llvm::dbgs() << "*\n*\n*\n*\n";  
 }
 
 OpenMPIRBuilder::~OpenMPIRBuilder() {
@@ -5066,6 +5073,8 @@ void OpenMPIRBuilder::emitTargetRegionFunction(
     Function *&OutlinedFn, Constant *&OutlinedFnID) {
 
   SmallString<64> EntryFnName;
+// ANCHOR
+llvm::dbgs() << "getTargetRegionEntryFnName\n";
   OffloadInfoManager.getTargetRegionEntryFnName(EntryFnName, EntryInfo);
 
   OutlinedFn = Config.isTargetDevice() || !Config.openMPOffloadMandatory()
@@ -5094,6 +5103,8 @@ Constant *OpenMPIRBuilder::registerTargetRegionFunction(
     setOutlinedTargetRegionFunctionAttributes(OutlinedFn);
   auto OutlinedFnID = createOutlinedFunctionID(OutlinedFn, EntryFnIDName);
   auto EntryAddr = createTargetRegionEntryAddr(OutlinedFn, EntryFnName);
+// ANCHOR
+llvm::dbgs() << "registerTargetRegionEntryInfo\n";
   OffloadInfoManager.registerTargetRegionEntryInfo(
       EntryInfo, EntryAddr, OutlinedFnID,
       OffloadEntriesInfoManager::OMPTargetRegionEntryTargetRegion);
@@ -6767,6 +6778,9 @@ void OpenMPIRBuilder::createOffloadEntry(Constant *ID, Constant *Addr,
 void OpenMPIRBuilder::createOffloadEntriesAndInfoMetadata(
     EmitMetadataErrorReportFunctionTy &ErrorFn) {
 
+// ANCHOR
+llvm::dbgs() << "starting createOffloadEntriesAndInfoMetadata\n";
+
   // If there are no entries, we don't need to do anything.
   if (OffloadInfoManager.empty())
     return;
@@ -6776,6 +6790,9 @@ void OpenMPIRBuilder::createOffloadEntriesAndInfoMetadata(
                         TargetRegionEntryInfo>,
               16>
       OrderedEntries(OffloadInfoManager.size());
+
+// ANCHOR
+llvm::dbgs() << "Determined that there are " << OffloadInfoManager.size() << " entries\n"; 
 
   // Auxiliary methods to create metadata values and strings.
   auto &&GetMDInt = [this](unsigned V) {
@@ -6790,6 +6807,7 @@ void OpenMPIRBuilder::createOffloadEntriesAndInfoMetadata(
       [&C, MD, &OrderedEntries, &GetMDInt, &GetMDString](
           const TargetRegionEntryInfo &EntryInfo,
           const OffloadEntriesInfoManager::OffloadEntryInfoTargetRegion &E) {
+
         // Generate metadata for target regions. Each entry of this metadata
         // contains:
         // - Entry 0 -> Kind of this type of metadata (0).
@@ -6806,6 +6824,9 @@ void OpenMPIRBuilder::createOffloadEntriesAndInfoMetadata(
             GetMDInt(EntryInfo.FileID), GetMDString(EntryInfo.ParentName),
             GetMDInt(EntryInfo.Line),   GetMDInt(EntryInfo.Count),
             GetMDInt(E.getOrder())};
+
+// ANCHOR
+llvm::dbgs() << "Generating metadata for target region in function " << *(Ops[3]) << "\n";
 
         // Save this entry in the right position of the ordered entries array.
         OrderedEntries[E.getOrder()] = std::make_pair(&E, EntryInfo);
@@ -7116,7 +7137,8 @@ void OpenMPIRBuilder::registerTargetGlobalVariable(
     VarSize = M.getDataLayout().getPointerSize();
     Linkage = GlobalValue::WeakAnyLinkage;
   }
-
+// ANCHOR
+llvm::dbgs() << "registerGlobalVarEntryInfo\n";
   OffloadInfoManager.registerDeviceGlobalVarEntryInfo(VarName, Addr, VarSize,
                                                       Flags, Linkage);
 }
@@ -7126,6 +7148,9 @@ void OpenMPIRBuilder::registerTargetGlobalVariable(
 void OpenMPIRBuilder::loadOffloadInfoMetadata(Module &M) {
   // If we are in target mode, load the metadata from the host IR. This code has
   // to match the metadata creation in createOffloadEntriesAndInfoMetadata().
+
+// ANCHOR
+llvm::dbgs() << "loadOffloadInfoMetadata\n";
 
   NamedMDNode *MD = M.getNamedMetadata(ompOffloadInfoName);
   if (!MD)
@@ -7153,12 +7178,16 @@ void OpenMPIRBuilder::loadOffloadInfoMetadata(Module &M) {
                                       /*FileID=*/GetMDInt(2),
                                       /*Line=*/GetMDInt(4),
                                       /*Count=*/GetMDInt(5));
+// ANCHOR
+llvm::dbgs() << "initializeTargetRegionEntryInfo\n";
       OffloadInfoManager.initializeTargetRegionEntryInfo(EntryInfo,
                                                          /*Order=*/GetMDInt(6));
       break;
     }
     case OffloadEntriesInfoManager::OffloadEntryInfo::
         OffloadingEntryInfoDeviceGlobalVar:
+// ANCHOR
+llvm::dbgs() << "initializeDeviceGlobalVarEnryInfo\n";
       OffloadInfoManager.initializeDeviceGlobalVarEntryInfo(
           /*MangledName=*/GetMDString(1),
           static_cast<OffloadEntriesInfoManager::OMPTargetGlobalVarEntryKind>(
@@ -7227,12 +7256,20 @@ Function *OpenMPIRBuilder::createRegisterRequires(StringRef Name) {
 //===----------------------------------------------------------------------===//
 
 bool OffloadEntriesInfoManager::empty() const {
+
+// ANCHOR
+llvm::dbgs() << "Info.empty()\n";
+
   return OffloadEntriesTargetRegion.empty() &&
          OffloadEntriesDeviceGlobalVar.empty();
 }
 
 unsigned OffloadEntriesInfoManager::getTargetRegionEntryInfoCount(
     const TargetRegionEntryInfo &EntryInfo) const {
+
+// ANCHOR
+llvm::dbgs() << "Info.getTargetRegionEntryInfoCount\n";
+
   auto It = OffloadEntriesTargetRegionCount.find(
       getTargetRegionEntryCountKey(EntryInfo));
   if (It == OffloadEntriesTargetRegionCount.end())
@@ -7242,6 +7279,10 @@ unsigned OffloadEntriesInfoManager::getTargetRegionEntryInfoCount(
 
 void OffloadEntriesInfoManager::incrementTargetRegionEntryInfoCount(
     const TargetRegionEntryInfo &EntryInfo) {
+
+// ANCHOR
+llvm::dbgs() << "Info.incrementTargetRegionEntryInfoCount\n";
+
   OffloadEntriesTargetRegionCount[getTargetRegionEntryCountKey(EntryInfo)] =
       EntryInfo.Count + 1;
 }
@@ -7249,15 +7290,29 @@ void OffloadEntriesInfoManager::incrementTargetRegionEntryInfoCount(
 /// Initialize target region entry.
 void OffloadEntriesInfoManager::initializeTargetRegionEntryInfo(
     const TargetRegionEntryInfo &EntryInfo, unsigned Order) {
+
+// ANCHOR
+llvm::dbgs() << "Info.initializeTargetRegionEntryInfo\n";
+
+llvm::dbgs() << EntryInfo.ParentName << " - " << EntryInfo.DeviceID << " - " << EntryInfo.Line << " -" << EntryInfo.Count  << "\n";
+
+if(OffloadEntriesTargetRegion.count(EntryInfo)) llvm::dbgs() << "DUPLICATE\n";
+
+  if(!OffloadEntriesTargetRegion.count(EntryInfo)) {
   OffloadEntriesTargetRegion[EntryInfo] =
       OffloadEntryInfoTargetRegion(Order, /*Addr=*/nullptr, /*ID=*/nullptr,
                                    OMPTargetRegionEntryTargetRegion);
   ++OffloadingEntriesNum;
+  }
 }
 
 void OffloadEntriesInfoManager::registerTargetRegionEntryInfo(
     TargetRegionEntryInfo EntryInfo, Constant *Addr, Constant *ID,
     OMPTargetRegionEntryKind Flags) {
+
+// ANCHOR
+llvm::dbgs() << "Info.registerTargetRegionEntryInfo\n";
+
   assert(EntryInfo.Count == 0 && "expected default EntryInfo");
 
   // Update the EntryInfo with the next available count for this location.
@@ -7290,6 +7345,10 @@ void OffloadEntriesInfoManager::registerTargetRegionEntryInfo(
 bool OffloadEntriesInfoManager::hasTargetRegionEntryInfo(
     TargetRegionEntryInfo EntryInfo, bool IgnoreAddressId) const {
 
+
+// ANCHOR
+llvm::dbgs() << "Info.hasTargetRegionEntryInfo\n";
+
   // Update the EntryInfo with the next available count for this location.
   EntryInfo.Count = getTargetRegionEntryInfoCount(EntryInfo);
 
@@ -7305,6 +7364,10 @@ bool OffloadEntriesInfoManager::hasTargetRegionEntryInfo(
 
 void OffloadEntriesInfoManager::actOnTargetRegionEntriesInfo(
     const OffloadTargetRegionEntryInfoActTy &Action) {
+
+// ANCHOR
+llvm::dbgs() << "Acting on " << OffloadEntriesTargetRegion.size() << " entries\n"; 
+
   // Scan all target region entries and perform the provided action.
   for (const auto &It : OffloadEntriesTargetRegion) {
     Action(It.first, It.second);
@@ -7360,6 +7423,8 @@ void OffloadEntriesInfoManager::registerDeviceGlobalVarEntryInfo(
 void OffloadEntriesInfoManager::actOnDeviceGlobalVarEntriesInfo(
     const OffloadDeviceGlobalVarEntryInfoActTy &Action) {
   // Scan all target region entries and perform the provided action.
+// ANCHOR
+llvm::dbgs() << "Acting on " << OffloadEntriesDeviceGlobalVar.size() << " entries\n";
   for (const auto &E : OffloadEntriesDeviceGlobalVar)
     Action(E.getKey(), E.getValue());
 }

@@ -338,6 +338,9 @@ CodeGenModule::CodeGenModule(ASTContext &C,
       VMContext(M.getContext()), Types(*this), VTables(*this),
       SanitizerMD(new SanitizerMetadata(*this)) {
 
+
+llvm::dbgs() << "Start CodeGenModule\n";
+
   // Initialize the type cache.
   llvm::LLVMContext &LLVMContext = M.getContext();
   VoidTy = llvm::Type::getVoidTy(LLVMContext);
@@ -440,7 +443,12 @@ CodeGenModule::CodeGenModule(ASTContext &C,
   }
 }
 
-CodeGenModule::~CodeGenModule() {}
+CodeGenModule::~CodeGenModule() {
+
+// ANCHOR
+llvm::dbgs() << "End CodeGenModule\n";
+
+}
 
 void CodeGenModule::createObjCRuntime() {
   // This is just isGNUFamily(), but we want to force implementors of

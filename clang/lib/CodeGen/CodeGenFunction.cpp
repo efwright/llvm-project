@@ -77,6 +77,10 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
       DebugInfo(CGM.getModuleDebugInfo()), PGO(cgm),
       ShouldEmitLifetimeMarkers(
           shouldEmitLifetimeMarkers(CGM.getCodeGenOpts(), CGM.getLangOpts())) {
+
+// ANCHOR
+llvm::dbgs() << "Start CGF\n";
+
   if (!suppressNewContext)
     CGM.getCXXABI().getMangleContext().startNewFunction();
   EHStack.setCGF(this);
@@ -87,6 +91,9 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
 CodeGenFunction::~CodeGenFunction() {
   assert(LifetimeExtendedCleanupStack.empty() && "failed to emit a cleanup");
 
+// ANCHOR
+llvm::dbgs() << "Begin ~CGF on:\n";
+
   if (getLangOpts().OpenMP && CurFn)
     CGM.getOpenMPRuntime().functionFinished(*this);
 
@@ -96,7 +103,12 @@ CodeGenFunction::~CodeGenFunction() {
   // time of the CodeGenModule, because we have to ensure the IR has not yet
   // been "emitted" to the outside, thus, modifications are still sensible.
   if (CGM.getLangOpts().OpenMP && CurFn)
+  //if (CGM.getLangOpts().OpenMPIRBuilder && CurFn)
     CGM.getOpenMPRuntime().getOMPBuilder().finalize(CurFn);
+
+// ANCHOR
+llvm::dbgs() << "End ~CGF\n";
+
 }
 
 // Map the LangOption for exception behavior into

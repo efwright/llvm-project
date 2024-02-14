@@ -1033,6 +1033,10 @@ static FieldDecl *addFieldToRecordDecl(ASTContext &C, DeclContext *DC,
 
 CGOpenMPRuntime::CGOpenMPRuntime(CodeGenModule &CGM)
     : CGM(CGM), OMPBuilder(CGM.getModule()) {
+
+// ANCHOR
+llvm::dbgs() << "Start CGOpenMPRuntime\n";
+
   KmpCriticalNameTy = llvm::ArrayType::get(CGM.Int32Ty, /*NumElements*/ 8);
   llvm::OpenMPIRBuilderConfig Config(
       CGM.getLangOpts().OpenMPIsTargetDevice, isGPU(),
@@ -1054,6 +1058,10 @@ CGOpenMPRuntime::CGOpenMPRuntime(CodeGenModule &CGM)
 }
 
 void CGOpenMPRuntime::clear() {
+
+// ANCHOR
+llvm::dbgs() << "CGOpenMPRuntime clear\n";
+
   InternalVars.clear();
   // Clean non-target variable declarations possibly used only in debug info.
   for (const auto &Data : EmittedNonTargetVariables) {
@@ -2823,6 +2831,9 @@ void CGOpenMPRuntime::createOffloadEntriesAndInfoMetadata() {
     } break;
     }
   };
+
+// ANCHOR
+llvm::dbgs() << "CLANG createOffloadEntriesAndInfoMetadata\n";
 
   OMPBuilder.createOffloadEntriesAndInfoMetadata(ErrorReportFn);
 }

@@ -262,7 +262,7 @@ public:
   /// Return true if a there are no entries defined.
   bool empty() const;
   /// Return number of entries defined so far.
-  unsigned size() const { return OffloadingEntriesNum; }
+  unsigned size() const { return OffloadingEntriesNum /*OffloadEntriesTargetRegion.size()*/ /*OffloadingEntriesNum*/; }
 
   OffloadEntriesInfoManager(OpenMPIRBuilder *builder) : OMPBuilder(builder) {}
 
