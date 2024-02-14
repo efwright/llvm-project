@@ -3256,7 +3256,7 @@ OpenMPIRBuilder::InsertPointTy OpenMPIRBuilder::createReductionsGPU(
   } else {
     CodeGenIP = Builder.saveIP();
     ReductionFunc = createReductionFunction(
-        Builder.GetInsertBlock()->getParent()->getName(), ReductionInfos, true,
+        Builder.GetInsertBlock()->getParent()->getName(), ReductionInfos,
         ReductionGenCBTy, FuncAttrs);
     Builder.restoreIP(CodeGenIP);
   }
