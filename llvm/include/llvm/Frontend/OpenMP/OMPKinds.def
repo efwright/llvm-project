@@ -505,9 +505,7 @@ __OMP_RTL(__kmpc_barrier_simple_generic, false, Void, IdentPtr, Int32)
 __OMP_RTL(__kmpc_warp_active_thread_mask, false, Int64,)
 __OMP_RTL(__kmpc_syncwarp, false, Void, Int64)
 
-__OMP_RTL(__kmpc_simd_4, false, Void, IdentPtr, LoopTaskPtr, Int32, VoidPtrPtr, Int32)
 __OMP_RTL(__kmpc_simd_4u, false, Void, IdentPtr, LoopTaskPtr, Int32, VoidPtrPtr, Int32)
-__OMP_RTL(__kmpc_simd_8, false, Void, IdentPtr, LoopTaskPtr, Int64, VoidPtrPtr, Int32)
 __OMP_RTL(__kmpc_simd_8u, false, Void, IdentPtr, LoopTaskPtr, Int64, VoidPtrPtr, Int32)
 
 __OMP_RTL(__last, false, Void, )

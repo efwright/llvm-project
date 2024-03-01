@@ -634,9 +634,6 @@ Function *OpenMPIRBuilder::getOrCreateRuntimeFunctionPtr(RuntimeFunction FnID) {
 void OpenMPIRBuilder::initialize() { initializeTypes(M); }
 
 void OpenMPIRBuilder::finalize(Function *Fn) {
-// ANCHOR 
-   llvm::dbgs () << "Starting finalize for function:\n" << *Fn << "\n";
-
   SmallPtrSet<BasicBlock *, 32> ParallelRegionBlockSet;
   SmallVector<BasicBlock *, 32> Blocks;
   SmallVector<OutlineInfo, 16> DeferredOutlines;
@@ -739,12 +736,8 @@ void OpenMPIRBuilder::finalize(Function *Fn) {
               "OMPIRBuilder finalization \n";
   };
 
-  if (!OffloadInfoManager.empty()) {
-// ANCHOR
-llvm::dbgs() << "createOffloadEntriesAndInfoMetadata - create metadata for functions containing offloaded target regions.\n";
+  if (!OffloadInfoManager.empty()) 
     createOffloadEntriesAndInfoMetadata(ErrorReportFn);
-  }
-llvm::dbgs() << "*\n*\n*\n*\n";  
 }
 
 OpenMPIRBuilder::~OpenMPIRBuilder() {
@@ -1296,8 +1289,7 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
   LoopBodyCallbackTy BodyGenCB,
   TripCountCallbackTy DistanceCB,
   PrivatizeCallbackTy PrivCB,
-  FinalizeCallbackTy FiniCB,
-  bool SPMDMode
+  FinalizeCallbackTy FiniCB
 )
 {
   assert(!isConflictIP(Loc.IP, OuterAllocaIP) && "IPs must not be ambiguous");
@@ -1308,12 +1300,12 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
   uint32_t SrcLocStrSize;
   Constant *SrcLocStr = getOrCreateSrcLocStr(Loc, SrcLocStrSize);
   Value *Ident = getOrCreateIdent(SrcLocStr, SrcLocStrSize);
-  Value *ThreadID = getOrCreateThreadID(Ident);
+  //Value *ThreadID = getOrCreateThreadID(Ident);
 
   BasicBlock *InsertBB = Builder.GetInsertBlock();
   Function *OuterFn = InsertBB->getParent();
 
-  LLVM_DEBUG(dbgs() << "At the start of createSimdLoop: " << *OuterFn << "\n");
+  LLVM_DEBUG(dbgs() << "At the start of createSimdLoop:\n" << *OuterFn << "\n");
 
   // Save the outer alloca block because the insertion iterator may get
   // invalidated and we still need this later.
@@ -1355,93 +1347,65 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
     return FiniCB(IP);
   };
 
-  FinalizationStack.push_back({FiniCBWrapper, OMPD_parallel, false});
+  FinalizationStack.push_back({FiniCBWrapper, OMPD_simd, false});
 
   // Compute the loop trip count
-  // Insert after the outer alloca to ensure all variables need
+  // Insert after the outer alloca to ensure all variables needed
   // in its calculation are ready
   InsertPointTy DistanceIP(LRegDistanceBB, LRegDistanceBB->begin());
-  Value *DistVal;
-  bool IsTripCountSigned;
   assert(DistanceCB && "expected loop trip count callback function!");
-  DistanceCB(DistanceIP, DistVal, IsTripCountSigned);
+  // This callback function should write the values of DistVal and IsTripCountSigned
+  Value *DistVal = DistanceCB(DistanceIP);
   assert(DistVal && "trip count call back should return integer trip count");
   Type *DistValType = DistVal->getType();
   assert(DistValType->isIntegerTy() && "trip count should be integer type");
 
-  // Experimental: no need to cast. just call the correct runtime func for int type
-  // Possibly need to cast DistVal to Int64
-  // FIXME if the integer is signed it needs to be converted to
-  // unsigned. If the tripcount is <0 it's fine to just convert
-  // it to 0.
-  //if(!DistValType->isIntegerTy(64)) {
-  //  Builder.SetInsertPoint(LRegDistanceBB->getTerminator());
-  //  DistVal = Builder.CreateIntCast(
-  //   DistVal, Int64, /*IsTripCountSigned*/ false, DistVal->getName()+".casted");
-  //}
-
-  LLVM_DEBUG(dbgs() << "After DistanceCB: " << *LRegDistanceBB << "\n");
-  LLVM_DEBUG(dbgs() << "Trip count variable: " << *DistVal << " " << IsTripCountSigned << "\n");
+  LLVM_DEBUG(dbgs() << "After DistanceCB:\n" << *LRegDistanceBB << "\n");
+  LLVM_DEBUG(dbgs() << "Trip count variable: " << *DistVal << "\n");
 
   // Create the virtual iteration variable that will be pulled into
   // the outlined function.
   Builder.restoreIP(OuterAllocaIP);
-  //AllocaInst *OMPIVAlloca = Builder.CreateAlloca(Int64, nullptr, "omp.iv.tmp");
-  //LoadInst *OMPIVLoad = Builder.CreateLoad(Int64, OMPIVAlloca, "omp.iv");
   AllocaInst *OMPIVAlloca = Builder.CreateAlloca(DistValType, nullptr, "omp.iv.tmp");
-  LoadInst *OMPIVLoad = Builder.CreateLoad(DistValType, OMPIVAlloca, "omp.iv");
+  Instruction *OMPIV = Builder.CreateLoad(DistValType, OMPIVAlloca, "omp.iv");
 
   // Generate the privatization allocas in the block that will become the entry
   // of the outlined function.
   Builder.SetInsertPoint(PRegEntryBB->getTerminator());
   InsertPointTy InnerAllocaIP = Builder.saveIP();
 
-  // Use omp.iv in the outlined region. Cast it if needed.
-  Instruction *OMPIV = OMPIVLoad;
-  //if(!DistValType->isIntegerTy(64)) {
-    // Cast omp.iv to the same type as the trip count.
-    // If the cast is needed, keep it in the outlined region
-    //OMPIV = dyn_cast<Instruction>(
-      //Builder.CreateTrunc(OMPIVLoad, DistValType, "omp.iv.casted"));
-  //} else {
-    // If cast is unneeded, we still need to generate a fake use of
-    // omp.iv so the outlined function picks it up as the first arg
-    Instruction *OMPIVUse = dyn_cast<Instruction>(
-     Builder.CreateAdd(OMPIVLoad, OMPIVLoad, "omp.iv.tobedeleted"));
-    //OMPIV = OMPIVLoad;
-    ToBeDeleted.push_back(OMPIVUse);
-  //}
+  // Use omp.iv in the outlined region so it gets captured during the outline
+  //Instruction *OMPIV = OMPIVLoad;
+  Instruction *OMPIVUse = dyn_cast<Instruction>(
+    Builder.CreateAdd(OMPIV, OMPIV, "omp.iv.tobedeleted"));
 
+  // All of the temporary omp.iv variables need to be deleted later
   // Order matters
-  ToBeDeleted.push_back(OMPIVLoad);
+  ToBeDeleted.push_back(OMPIVUse);
+  ToBeDeleted.push_back(OMPIV);
   ToBeDeleted.push_back(OMPIVAlloca);
 
-  LLVM_DEBUG(llvm::dbgs() << "omp.iv variable generated: " << *OuterFn << "\n");
+  LLVM_DEBUG(llvm::dbgs() << "omp.iv variable generated:\n" << *OuterFn << "\n");
 
-  LLVM_DEBUG(dbgs() << "Before body codegen: " << *OuterFn << "\n");
+  LLVM_DEBUG(dbgs() << "Before body codegen:\n" << *OuterFn << "\n");
   assert(BodyGenCB && "Expected body generation callback!");
   InsertPointTy CodeGenIP(PRegBodyBB, PRegBodyBB->begin());
 
+  // Generate the body of the loop. The omp.iv variable is a value between 
+  // 0 <= omp.iv < TripCount
+  // If a loop variable is needed, then this callback function can initialize
+  // it based on the omp.iv.
   BodyGenCB(InnerAllocaIP, CodeGenIP, OMPIV);
 
-  LLVM_DEBUG(dbgs() << "After body codegen: " << *OuterFn << "\n");
+  LLVM_DEBUG(dbgs() << "After body codegen:\n" << *OuterFn << "\n");
 
-  FunctionCallee RTLFn; 
-  if(DistValType->isIntegerTy(32)) {
-    if(IsTripCountSigned) {
-      RTLFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_simd_4);
-    } else {
-      RTLFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_simd_4u);
-    }
-  } else {
-    if(IsTripCountSigned) {
-      RTLFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_simd_8);
-    } else {
-      RTLFn = getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_simd_8u);
-    }
-  }
+  // Determine what runtime function should be called based on the type
+  // of the trip count
+  //FunctionCallee RTLFn; 
 
-  //= getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_simd_51);
+  FunctionCallee RTLFn = getOrCreateRuntimeFunctionPtr(
+    (DistValType->isIntegerTy(32) ? OMPRTL___kmpc_simd_4u :
+                                    OMPRTL___kmpc_simd_8u));
 
   OutlineInfo OI;
 
@@ -1450,7 +1414,7 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
   // block and the exit block if we left the parallel "the normal way".
   auto FiniInfo = FinalizationStack.pop_back_val();
   (void)FiniInfo;
-  assert(FiniInfo.DK == OMPD_parallel &&
+  assert(FiniInfo.DK == OMPD_simd && 
          "Unexpected finalization stack state!");
 
   Instruction *PRegPreFiniTI = PRegPreFiniBB->getTerminator();
@@ -1495,7 +1459,7 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
 
   auto PrivHelper = [&](Value &V) {
     // Exclude omp.iv from aggregate
-    if (&V == OMPIVLoad) {
+    if (&V == OMPIV) {
       OI.ExcludeArgsFromAggregate.push_back(&V);
       return;
     }
@@ -1572,6 +1536,8 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
     assert(OutlinedFn.arg_size() == 2 &&
            "Expected omp.iv & structArg as arguments");
 
+    LLVM_DEBUG(llvm::dbgs () << "Outlined function - simd:\n" << OutlinedFn << "\n");
+
     CallInst *CI = cast<CallInst>(OutlinedFn.user_back());
     BasicBlock *CallBlock = CI->getParent();
     CallBlock->setName("omp_loop");
@@ -1589,7 +1555,7 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
     SmallVector<Value *, 16> RealArgs;
     RealArgs.append(std::begin(SimdArgs), std::end(SimdArgs));
 
-    CallInst *Simd51Call = Builder.CreateCall(RTLFn, RealArgs);
+    Builder.CreateCall(RTLFn, RealArgs);
 
     LLVM_DEBUG(dbgs() << "With runtime call placed: " << *Builder.GetInsertBlock()->getParent() << "\n");
 
@@ -5073,8 +5039,6 @@ void OpenMPIRBuilder::emitTargetRegionFunction(
     Function *&OutlinedFn, Constant *&OutlinedFnID) {
 
   SmallString<64> EntryFnName;
-// ANCHOR
-llvm::dbgs() << "getTargetRegionEntryFnName\n";
   OffloadInfoManager.getTargetRegionEntryFnName(EntryFnName, EntryInfo);
 
   OutlinedFn = Config.isTargetDevice() || !Config.openMPOffloadMandatory()
@@ -5103,8 +5067,6 @@ Constant *OpenMPIRBuilder::registerTargetRegionFunction(
     setOutlinedTargetRegionFunctionAttributes(OutlinedFn);
   auto OutlinedFnID = createOutlinedFunctionID(OutlinedFn, EntryFnIDName);
   auto EntryAddr = createTargetRegionEntryAddr(OutlinedFn, EntryFnName);
-// ANCHOR
-llvm::dbgs() << "registerTargetRegionEntryInfo\n";
   OffloadInfoManager.registerTargetRegionEntryInfo(
       EntryInfo, EntryAddr, OutlinedFnID,
       OffloadEntriesInfoManager::OMPTargetRegionEntryTargetRegion);
@@ -6778,9 +6740,6 @@ void OpenMPIRBuilder::createOffloadEntry(Constant *ID, Constant *Addr,
 void OpenMPIRBuilder::createOffloadEntriesAndInfoMetadata(
     EmitMetadataErrorReportFunctionTy &ErrorFn) {
 
-// ANCHOR
-llvm::dbgs() << "starting createOffloadEntriesAndInfoMetadata\n";
-
   // If there are no entries, we don't need to do anything.
   if (OffloadInfoManager.empty())
     return;
@@ -6790,9 +6749,6 @@ llvm::dbgs() << "starting createOffloadEntriesAndInfoMetadata\n";
                         TargetRegionEntryInfo>,
               16>
       OrderedEntries(OffloadInfoManager.size());
-
-// ANCHOR
-llvm::dbgs() << "Determined that there are " << OffloadInfoManager.size() << " entries\n"; 
 
   // Auxiliary methods to create metadata values and strings.
   auto &&GetMDInt = [this](unsigned V) {
@@ -6824,9 +6780,6 @@ llvm::dbgs() << "Determined that there are " << OffloadInfoManager.size() << " e
             GetMDInt(EntryInfo.FileID), GetMDString(EntryInfo.ParentName),
             GetMDInt(EntryInfo.Line),   GetMDInt(EntryInfo.Count),
             GetMDInt(E.getOrder())};
-
-// ANCHOR
-llvm::dbgs() << "Generating metadata for target region in function " << *(Ops[3]) << "\n";
 
         // Save this entry in the right position of the ordered entries array.
         OrderedEntries[E.getOrder()] = std::make_pair(&E, EntryInfo);
@@ -7137,8 +7090,6 @@ void OpenMPIRBuilder::registerTargetGlobalVariable(
     VarSize = M.getDataLayout().getPointerSize();
     Linkage = GlobalValue::WeakAnyLinkage;
   }
-// ANCHOR
-llvm::dbgs() << "registerGlobalVarEntryInfo\n";
   OffloadInfoManager.registerDeviceGlobalVarEntryInfo(VarName, Addr, VarSize,
                                                       Flags, Linkage);
 }
@@ -7148,9 +7099,6 @@ llvm::dbgs() << "registerGlobalVarEntryInfo\n";
 void OpenMPIRBuilder::loadOffloadInfoMetadata(Module &M) {
   // If we are in target mode, load the metadata from the host IR. This code has
   // to match the metadata creation in createOffloadEntriesAndInfoMetadata().
-
-// ANCHOR
-llvm::dbgs() << "loadOffloadInfoMetadata\n";
 
   NamedMDNode *MD = M.getNamedMetadata(ompOffloadInfoName);
   if (!MD)
@@ -7178,16 +7126,12 @@ llvm::dbgs() << "loadOffloadInfoMetadata\n";
                                       /*FileID=*/GetMDInt(2),
                                       /*Line=*/GetMDInt(4),
                                       /*Count=*/GetMDInt(5));
-// ANCHOR
-llvm::dbgs() << "initializeTargetRegionEntryInfo\n";
       OffloadInfoManager.initializeTargetRegionEntryInfo(EntryInfo,
                                                          /*Order=*/GetMDInt(6));
       break;
     }
     case OffloadEntriesInfoManager::OffloadEntryInfo::
         OffloadingEntryInfoDeviceGlobalVar:
-// ANCHOR
-llvm::dbgs() << "initializeDeviceGlobalVarEnryInfo\n";
       OffloadInfoManager.initializeDeviceGlobalVarEntryInfo(
           /*MangledName=*/GetMDString(1),
           static_cast<OffloadEntriesInfoManager::OMPTargetGlobalVarEntryKind>(
@@ -7256,19 +7200,12 @@ Function *OpenMPIRBuilder::createRegisterRequires(StringRef Name) {
 //===----------------------------------------------------------------------===//
 
 bool OffloadEntriesInfoManager::empty() const {
-
-// ANCHOR
-llvm::dbgs() << "Info.empty()\n";
-
   return OffloadEntriesTargetRegion.empty() &&
          OffloadEntriesDeviceGlobalVar.empty();
 }
 
 unsigned OffloadEntriesInfoManager::getTargetRegionEntryInfoCount(
     const TargetRegionEntryInfo &EntryInfo) const {
-
-// ANCHOR
-llvm::dbgs() << "Info.getTargetRegionEntryInfoCount\n";
 
   auto It = OffloadEntriesTargetRegionCount.find(
       getTargetRegionEntryCountKey(EntryInfo));
@@ -7280,9 +7217,6 @@ llvm::dbgs() << "Info.getTargetRegionEntryInfoCount\n";
 void OffloadEntriesInfoManager::incrementTargetRegionEntryInfoCount(
     const TargetRegionEntryInfo &EntryInfo) {
 
-// ANCHOR
-llvm::dbgs() << "Info.incrementTargetRegionEntryInfoCount\n";
-
   OffloadEntriesTargetRegionCount[getTargetRegionEntryCountKey(EntryInfo)] =
       EntryInfo.Count + 1;
 }
@@ -7291,27 +7225,15 @@ llvm::dbgs() << "Info.incrementTargetRegionEntryInfoCount\n";
 void OffloadEntriesInfoManager::initializeTargetRegionEntryInfo(
     const TargetRegionEntryInfo &EntryInfo, unsigned Order) {
 
-// ANCHOR
-llvm::dbgs() << "Info.initializeTargetRegionEntryInfo\n";
-
-llvm::dbgs() << EntryInfo.ParentName << " - " << EntryInfo.DeviceID << " - " << EntryInfo.Line << " -" << EntryInfo.Count  << "\n";
-
-if(OffloadEntriesTargetRegion.count(EntryInfo)) llvm::dbgs() << "DUPLICATE\n";
-
-  if(!OffloadEntriesTargetRegion.count(EntryInfo)) {
   OffloadEntriesTargetRegion[EntryInfo] =
       OffloadEntryInfoTargetRegion(Order, /*Addr=*/nullptr, /*ID=*/nullptr,
                                    OMPTargetRegionEntryTargetRegion);
   ++OffloadingEntriesNum;
-  }
 }
 
 void OffloadEntriesInfoManager::registerTargetRegionEntryInfo(
     TargetRegionEntryInfo EntryInfo, Constant *Addr, Constant *ID,
     OMPTargetRegionEntryKind Flags) {
-
-// ANCHOR
-llvm::dbgs() << "Info.registerTargetRegionEntryInfo\n";
 
   assert(EntryInfo.Count == 0 && "expected default EntryInfo");
 
@@ -7345,10 +7267,6 @@ llvm::dbgs() << "Info.registerTargetRegionEntryInfo\n";
 bool OffloadEntriesInfoManager::hasTargetRegionEntryInfo(
     TargetRegionEntryInfo EntryInfo, bool IgnoreAddressId) const {
 
-
-// ANCHOR
-llvm::dbgs() << "Info.hasTargetRegionEntryInfo\n";
-
   // Update the EntryInfo with the next available count for this location.
   EntryInfo.Count = getTargetRegionEntryInfoCount(EntryInfo);
 
@@ -7364,9 +7282,6 @@ llvm::dbgs() << "Info.hasTargetRegionEntryInfo\n";
 
 void OffloadEntriesInfoManager::actOnTargetRegionEntriesInfo(
     const OffloadTargetRegionEntryInfoActTy &Action) {
-
-// ANCHOR
-llvm::dbgs() << "Acting on " << OffloadEntriesTargetRegion.size() << " entries\n"; 
 
   // Scan all target region entries and perform the provided action.
   for (const auto &It : OffloadEntriesTargetRegion) {
@@ -7423,8 +7338,6 @@ void OffloadEntriesInfoManager::registerDeviceGlobalVarEntryInfo(
 void OffloadEntriesInfoManager::actOnDeviceGlobalVarEntriesInfo(
     const OffloadDeviceGlobalVarEntryInfoActTy &Action) {
   // Scan all target region entries and perform the provided action.
-// ANCHOR
-llvm::dbgs() << "Acting on " << OffloadEntriesDeviceGlobalVar.size() << " entries\n";
   for (const auto &E : OffloadEntriesDeviceGlobalVar)
     Action(E.getKey(), E.getValue());
 }

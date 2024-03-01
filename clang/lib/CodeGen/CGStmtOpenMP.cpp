@@ -2673,34 +2673,43 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
     llvm::OpenMPIRBuilder::InsertPointTy AllocaIP(
       AllocaInsertPt->getParent(), AllocaInsertPt->getIterator());
 
-    const auto *For = dyn_cast<ForStmt>(CL->getLoopStmt());
-    if(const Stmt *InitStmt = For->getInit())
-      EmitStmt(InitStmt);
-    const DeclRefExpr *LoopVarRef = CL->getLoopVarRef();
-    LValue LCVal = EmitLValue(LoopVarRef);
-    Address LoopVarAddress = LCVal.getAddress(*this);
-    llvm::AllocaInst *LoopVar = dyn_cast<llvm::AllocaInst>(LoopVarAddress.getPointer());
-
     llvm::OpenMPIRBuilder &OMPBuilder = CGM.getOpenMPRuntime().getOMPBuilder();
 
     using InsertPointTy = llvm::OpenMPIRBuilder::InsertPointTy;
 
-    // FIXME check if trip count is signed
-    auto DistanceCB = [this, CL, LoopVar](InsertPointTy CodeGenIP, llvm::Value *&TripCount, bool &Signed) -> void {
+    // Callback function for generating the trip count of the loop.
+    // This function should assign values to the TripCount and Signed variables
+    llvm::Value *LoopVar;
+    std::string LoopVarName;
+    auto DistanceCB = [&](InsertPointTy CodeGenIP) -> llvm::Value* {
       Builder.restoreIP(CodeGenIP);
 
+      // Emit the loop variable, needed for the distance func
+      const auto *For = dyn_cast<ForStmt>(CL->getLoopStmt());
+      if(const Stmt *InitStmt = For->getInit())
+        EmitStmt(InitStmt);
+
+      auto *LoopVarRef = CL->getLoopVarRef();
+      LValue LCVal = EmitLValue(LoopVarRef);
+      Address LoopVarAddress = LCVal.getAddress(*this);
+      LoopVar = dyn_cast<llvm::Instruction>(LoopVarAddress.getPointer());
+      LoopVarName = LoopVarRef->getNameInfo().getAsString();
+
+      // Emit the distance func from the CanonicalLoop
       const CapturedStmt *DistanceFunc = CL->getDistanceFunc();
       EmittedClosureTy DistanceClosure = emitCapturedStmtFunc(*this, DistanceFunc);
 
+      // Load the output and store it in the TripCount
       QualType LogicalTy = DistanceFunc->getCapturedDecl()
                            ->getParam(0)
                            ->getType()
                            .getNonReferenceType();
+
       Address CountAddr = CreateMemTemp(LogicalTy, ".count.addr");
       emitCapturedStmtCall(*this, DistanceClosure, {CountAddr.getPointer()});
-      TripCount = Builder.CreateLoad(CountAddr, ".count");
+      auto *TripCount = Builder.CreateLoad(CountAddr, ".count");
 
-      return;
+      return TripCount;
     };
 
     auto FiniCB = [this](InsertPointTy IP) {
@@ -2713,24 +2722,55 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
       return CodeGenIP;
     };
 
-    const Stmt *loopBody = S.getBody();
-    auto BodyGenCB = [loopBody, this, CL, LoopVar, &S]
+    auto BodyGenCB = [&]
                      (InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
                       llvm::Value *Virtual) {
+
       llvm::BasicBlock *CodeGenIPBB = CodeGenIP.getBlock();
 
+      // Generate the body of the loop
       OMPBuilderCBHelpers::EmitOMPOutlinedRegionBody(
           *this,
-          loopBody,
+          S.getBody(),
           AllocaIP,
           CodeGenIP,
           "simd");
 
-      Builder.restoreIP(AllocaIP);
-      llvm::AllocaInst *NewLoopVar =
-            Builder.CreateAlloca(LoopVar->getAllocatedType(), LoopVar->getAddressSpace(),
-                                 LoopVar->getArraySize(), LoopVar->getName()+".loopvar");
+      // The loop variable referenced in the body is allocated outside of the
+      // outlined region. Here we create a new privitized copy of the loop
+      // variable and replace all uses in the body with the private copy.
+      llvm::Value *NewLoopVar;
 
+      // The type of the new loop variable will be the same type
+      // as the first parameter of the LoopVarFunc
+      const CapturedStmt *LoopVarFunc = CL->getLoopVarFunc();
+      QualType Ty = LoopVarFunc->getCapturedDecl()
+                               ->getParam(0)
+                               ->getType()
+                                .getNonReferenceType();
+
+      QualType Tytest = LoopVarFunc->getCapturedDecl()
+                               ->getParam(1)
+                               ->getType()
+                                .getNonReferenceType();
+
+      llvm::Type *allocaTy = ConvertTypeForMem(Ty);
+
+      // Create the new Alloca
+      Builder.restoreIP(AllocaIP);
+      llvm::AllocaInst *NewLoopVarAlloca = Builder.CreateAlloca(
+        allocaTy, nullptr, LoopVarName+".loopvar"); 
+      NewLoopVar = NewLoopVarAlloca;
+
+      // If the alloca is not in the default address space, cast it
+      if(getASTAllocaAddressSpace() != LangAS::Default)
+        NewLoopVar = Builder.CreateAddrSpaceCast(
+          NewLoopVarAlloca,
+          allocaTy->getPointerTo(getContext().getTargetAddressSpace(LangAS::Default)),
+          NewLoopVarAlloca->getName() + ".ascast"
+      ); 
+
+      // Replaces uses of LoopVar with the new privitized variable
       for(llvm::User *U : LoopVar->users()) {
         if(auto I = dyn_cast<llvm::Instruction>(U)) {
           if(I->getParent() == CodeGenIPBB) {
@@ -2738,9 +2778,12 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
           }
         }
       }
-
-      const CapturedStmt *LoopVarFunc = CL->getLoopVarFunc();
-      EmittedClosureTy LoopVarClosure = emitCapturedStmtFunc(*this, LoopVarFunc);
+ 
+     // Emit the function for determining the loop variable's value based on the
+     // omp.iv. This is intentionally done here because the function will reference
+     // both the previous loop variable (allocated during trip count calculation) 
+     // and the newly created loop variable.
+     EmittedClosureTy LoopVarClosure = emitCapturedStmtFunc(*this, LoopVarFunc);
       Builder.SetInsertPoint(CodeGenIPBB, CodeGenIPBB->begin());
       emitCapturedStmtCall(*this, LoopVarClosure,
                            {NewLoopVar, Virtual});
@@ -2754,8 +2797,7 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
         BodyGenCB,
         DistanceCB,
         PrivCB,
-        FiniCB,
-        /*SPMD*/ true
+        FiniCB
     ));
 
     return;

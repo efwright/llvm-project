@@ -78,9 +78,6 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
       ShouldEmitLifetimeMarkers(
           shouldEmitLifetimeMarkers(CGM.getCodeGenOpts(), CGM.getLangOpts())) {
 
-// ANCHOR
-llvm::dbgs() << "Start CGF\n";
-
   if (!suppressNewContext)
     CGM.getCXXABI().getMangleContext().startNewFunction();
   EHStack.setCGF(this);
@@ -91,9 +88,6 @@ llvm::dbgs() << "Start CGF\n";
 CodeGenFunction::~CodeGenFunction() {
   assert(LifetimeExtendedCleanupStack.empty() && "failed to emit a cleanup");
 
-// ANCHOR
-llvm::dbgs() << "Begin ~CGF on:\n";
-
   if (getLangOpts().OpenMP && CurFn)
     CGM.getOpenMPRuntime().functionFinished(*this);
 
@@ -102,14 +96,9 @@ llvm::dbgs() << "Begin ~CGF on:\n";
   // seems to be a reasonable spot. We do it here, as opposed to the deletion
   // time of the CodeGenModule, because we have to ensure the IR has not yet
   // been "emitted" to the outside, thus, modifications are still sensible.
-  //if (CGM.getLangOpts().OpenMP && CurFn)
-  //if (CGM.getLangOpts().OpenMPIRBuilder && CurFn)
   if ((CGM.getLangOpts().OpenMPIRBuilder && CurFn) ||
       (CGM.getLangOpts().OpenMPIsTargetDevice && CurFn))
     CGM.getOpenMPRuntime().getOMPBuilder().finalize(CurFn);
-
-// ANCHOR
-llvm::dbgs() << "End ~CGF\n";
 
 }
 

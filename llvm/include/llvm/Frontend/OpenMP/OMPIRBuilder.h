@@ -553,7 +553,7 @@ public:
 
   using TripCountCallbackTy =
       function_ref<
-        void(InsertPointTy CodeGenIP, Value *&TripCount, bool &Signed)
+        Value*(InsertPointTy CodeGenIP)
       >;
 
   // This is created primarily for sections construct as llvm::function_ref
@@ -640,8 +640,7 @@ public:
                  LoopBodyCallbackTy BodyGenCB,
                  TripCountCallbackTy DistanceCB,
                  PrivatizeCallbackTy PrivCB,
-                 FinalizeCallbackTy FiniCB,
-                 bool SPMDMode);
+                 FinalizeCallbackTy FiniCB);
 
   /// Generator for '#omp parallel'
   ///
