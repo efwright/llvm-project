@@ -473,7 +473,7 @@ void SimdLoop(
   IdentTy *ident, void *WorkFn, IType TripCount,
   void **Args, uint32_t nargs
 ) {
-  ASSERT(WorkFn, "expected valid outlined function");
+  ASSERT(WorkFn, "expected valid outlined function"); 
   for(IType omp_iv = 0; omp_iv < TripCount; omp_iv++) {
     ((void (*)(IType, void**))WorkFn)(omp_iv, Args);
   }
@@ -912,6 +912,8 @@ OMP_LOOP_ENTRY(_4, int32_t)
 OMP_LOOP_ENTRY(_4u, uint32_t)
 OMP_LOOP_ENTRY(_8, int64_t)
 OMP_LOOP_ENTRY(_8u, uint64_t)
+=======
+>>>>>>> e4dbd7dc24f3adcc552bac014120a5d594ce770e
 }
 
 #pragma omp end declare target

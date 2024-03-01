@@ -1300,7 +1300,6 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
   uint32_t SrcLocStrSize;
   Constant *SrcLocStr = getOrCreateSrcLocStr(Loc, SrcLocStrSize);
   Value *Ident = getOrCreateIdent(SrcLocStr, SrcLocStrSize);
-  //Value *ThreadID = getOrCreateThreadID(Ident);
 
   BasicBlock *InsertBB = Builder.GetInsertBlock();
   Function *OuterFn = InsertBB->getParent();
@@ -1535,8 +1534,6 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
 
     assert(OutlinedFn.arg_size() == 2 &&
            "Expected omp.iv & structArg as arguments");
-
-    LLVM_DEBUG(llvm::dbgs () << "Outlined function - simd:\n" << OutlinedFn << "\n");
 
     CallInst *CI = cast<CallInst>(OutlinedFn.user_back());
     BasicBlock *CallBlock = CI->getParent();
