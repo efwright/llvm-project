@@ -2962,8 +2962,7 @@ StmtResult Parser::ParseOpenMPDeclarativeOrExecutableDirective(
         Sema::CompoundScopeRAII Scope(Actions);
         AssociatedStmt = ParseStatement();
 
-        if (AssociatedStmt.isUsable() && isOpenMPLoopDirective(DKind) &&
-            getLangOpts().OpenMPIRBuilder)
+        if (AssociatedStmt.isUsable() && isOpenMPLoopDirective(DKind))
           AssociatedStmt = Actions.ActOnOpenMPLoopnest(AssociatedStmt.get());
       }
       AssociatedStmt = Actions.ActOnOpenMPRegionEnd(AssociatedStmt, Clauses);

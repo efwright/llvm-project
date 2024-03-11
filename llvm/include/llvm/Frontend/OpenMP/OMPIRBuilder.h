@@ -262,7 +262,7 @@ public:
   /// Return true if a there are no entries defined.
   bool empty() const;
   /// Return number of entries defined so far.
-  unsigned size() const { return OffloadingEntriesNum; }
+  unsigned size() const { return OffloadingEntriesNum /*OffloadEntriesTargetRegion.size()*/ /*OffloadingEntriesNum*/; }
 
   OffloadEntriesInfoManager(OpenMPIRBuilder *builder) : OMPBuilder(builder) {}
 
@@ -548,6 +548,16 @@ public:
   using BodyGenCallbackTy =
       function_ref<void(InsertPointTy AllocaIP, InsertPointTy CodeGenIP)>;
 
+  using LoopBodyCallbackTy =
+      function_ref<void(
+        InsertPointTy AllocaIP, InsertPointTy CodeGenIP, Value *IterationNum
+      )>;
+
+  using TripCountCallbackTy =
+      function_ref<
+        Value*(InsertPointTy CodeGenIP)
+      >;
+
   // This is created primarily for sections construct as llvm::function_ref
   // (BodyGenCallbackTy) is not storable (as described in the comments of
   // function_ref class - function_ref contains non-ownable reference
@@ -626,6 +636,13 @@ public:
   /// \returns The insertion point after the barrier.
   InsertPointTy createCancel(const LocationDescription &Loc, Value *IfCondition,
                              omp::Directive CanceledDirective);
+
+  IRBuilder<>::InsertPoint
+  createSimdLoop(const LocationDescription &Loc, InsertPointTy AllocaIP,
+                 LoopBodyCallbackTy BodyGenCB,
+                 TripCountCallbackTy DistanceCB,
+                 PrivatizeCallbackTy PrivCB,
+                 FinalizeCallbackTy FiniCB);
 
   /// Generator for '#omp parallel'
   ///
