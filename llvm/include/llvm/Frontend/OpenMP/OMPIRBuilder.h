@@ -470,6 +470,11 @@ public:
   ///                              all functions are finalized.
   void finalize(Function *Fn = nullptr);
 
+  CallInst *globalizeAlloca(AllocaInst *Alloca, SmallVector<Instruction*, 32>&);
+  void globalizeParallelVars(Function *CurFn);
+  SmallPtrSet<Value*, 32> VarsNeedingGlobalization;
+  void globalizeVars(Function *CurFn);
+
   /// Add attributes known for \p FnID to \p Fn.
   void addAttributes(omp::RuntimeFunction FnID, Function &Fn);
 
