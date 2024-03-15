@@ -794,6 +794,9 @@ void OpenMPIRBuilder::finalize(Function *Fn) {
 
   if (!OffloadInfoManager.empty()) 
     createOffloadEntriesAndInfoMetadata(ErrorReportFn);
+
+  dbgs() << "End of finalize\n" << *Fn << "\n";
+
 }
 
 CallInst * OpenMPIRBuilder::globalizeAlloca(
@@ -814,6 +817,7 @@ CallInst * OpenMPIRBuilder::globalizeAlloca(
   };
 
   CallInst *AllocSharedCall = Builder.CreateCall(AllocFn, ArrayRef<Value*>(SharedAllocArgs, 1));
+  AllocSharedCall->setName(Alloca->getName() + "_on_stack");
   //Value *ReplValue = Builder.CreateBitcast(AllocSharedCall, Alloca->getType(), Alloca->getName() + "_on_stack");
 
   dbgs() << "Created " << *AllocSharedCall << "\n";
