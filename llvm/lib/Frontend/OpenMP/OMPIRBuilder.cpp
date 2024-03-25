@@ -784,7 +784,7 @@ void OpenMPIRBuilder::finalize(Function *Fn) {
   for (Function *F : ConstantAllocaRaiseCandidates)
     raiseUserConstantDataAllocasToEntryBlock(Builder, F);
 
-  globalizeVars(Fn);
+  //globalizeVars(Fn);
 
   EmitMetadataErrorReportFunctionTy &&ErrorReportFn =
       [](EmitMetadataErrorKind Kind,
@@ -801,6 +801,7 @@ void OpenMPIRBuilder::finalize(Function *Fn) {
     std::vector<WeakTrackingVH> LLVMCompilerUsed = {
         M.getGlobalVariable("__openmp_nvptx_data_transfer_temporary_storage")};
     emitUsed("llvm.compiler.used", LLVMCompilerUsed);
+  }
 
   dbgs() << "End of finalize\n" << *Fn << "\n";
 
@@ -1538,14 +1539,17 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
 
   BasicBlock *ThenBB = ThenTI->getParent();
   BasicBlock *LRegDistanceBB = ThenBB->splitBasicBlock(ThenTI, "omp.loop.distance");
-  BasicBlock *PRegEntryBB = LRegDistanceBB->splitBasicBlock(ThenTI, "omp.loop.entry");
+  BasicBlock *LRegReductionProlog = LRegDistanceBB->splitBasicBlock(ThenTI, "omp.reduction.prolog");
+  BasicBlock *PRegEntryBB = LRegReductionProlog->splitBasicBlock(ThenTI, "omp.loop.entry");
   BasicBlock *PRegBodyBB =
       PRegEntryBB->splitBasicBlock(ThenTI, "omp.loop.region");
   BasicBlock *PRegPreFiniBB =
       PRegBodyBB->splitBasicBlock(ThenTI, "omp.loop.pre_finalize");
   BasicBlock *PRegExitBB =
       PRegPreFiniBB->splitBasicBlock(ThenTI, "omp.loop.exit");
+  //BasicBlock *LRegReductionEpilog = PRegExitBB->splitBasicBlock(ThenTI, "omp.reduction.epilog");
 
+dbgs() << "CHECKPOINT\n" << *OuterFn << "\n";
 
   auto FiniCBWrapper = [&](InsertPointTy IP) {
     // Hide "open-ended" blocks from the given FiniCB by setting the right jump
@@ -1602,17 +1606,21 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
 
   LLVM_DEBUG(llvm::dbgs() << "omp.iv variable generated:\n" << *OuterFn << "\n");
 
-  LLVM_DEBUG(dbgs() << "Before body codegen:\n" << *OuterFn << "\n");
+  dbgs() << "Before body codegen:\n" << *OuterFn << "\n";
   assert(BodyGenCB && "Expected body generation callback!");
   InsertPointTy CodeGenIP(PRegBodyBB, PRegBodyBB->begin());
+
+  InsertPointTy ReductionPrologIP(LRegReductionProlog, LRegReductionProlog->begin());
+  //InsertPointTy ReductionEpilogIP(LRegReductionEpilog, LRegReductionEpilog->begin());
+  InsertPointTy ReductionEpilogIP(PRegExitBB, PRegExitBB->begin());
 
   // Generate the body of the loop. The omp.iv variable is a value between 
   // 0 <= omp.iv < TripCount
   // If a loop variable is needed, then this callback function can initialize
   // it based on the omp.iv.
-  BodyGenCB(InnerAllocaIP, CodeGenIP, OMPIV);
+  BodyGenCB(InnerAllocaIP, CodeGenIP, ReductionPrologIP, ReductionEpilogIP, OMPIV);
 
-  LLVM_DEBUG(dbgs() << "After body codegen:\n" << *OuterFn << "\n");
+  dbgs() << "After body codegen:\n" << *OuterFn << "\n";
 
   // Determine what runtime function should be called based on the type
   // of the trip count
@@ -1641,16 +1649,27 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
   OI.EntryBB = PRegEntryBB;
   OI.ExitBB = PRegExitBB;
 
+dbgs() << "CHECKPOINT2\n" << *OuterFn << "\n";
+
   SmallPtrSet<BasicBlock *, 32> ParallelRegionBlockSet;
   SmallVector<BasicBlock *, 32> Blocks;
   OI.collectBlocks(ParallelRegionBlockSet, Blocks);
+
+dbgs() << "CHECKPOINT3\n";
+for(auto BB : ParallelRegionBlockSet)
+  dbgs() << *BB << "\n";
+
+dbgs() << "CHECKPOINT4\n";
+for(auto BB : Blocks)
+  dbgs() << *BB << "\n";
 
   // Ensure a single exit node for the outlined region by creating one.
   // We might have multiple incoming edges to the exit now due to finalizations,
   // e.g., cancel calls that cause the control flow to leave the region.
   BasicBlock *PRegOutlinedExitBB = PRegExitBB;
   PRegExitBB = SplitBlock(PRegExitBB, &*PRegExitBB->getFirstInsertionPt());
-  PRegOutlinedExitBB->setName("omp.loop.outlined.exit");
+  //PRegOutlinedExitBB->setName("omp.loop.outlined.exit");
+  PRegOutlinedExitBB->setName("omp.reduction.epilog");
   Blocks.push_back(PRegOutlinedExitBB);
 
   CodeExtractorAnalysisCache CEAC(*OuterFn);

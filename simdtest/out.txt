@@ -1,0 +1,263 @@
+Start CGOpenMPRuntime
+Here's the vardecl: sum
+CLANG createOffloadEntriesAndInfoMetadata
+CGOpenMPRuntime clear
+Start CGOpenMPRuntime
+CHECKPOINT
+; Function Attrs: convergent noinline norecurse nounwind optnone
+define internal void @__omp_offloading_50_239ef55_main_l6_omp_outlined(ptr noalias noundef %.global_tid., ptr noalias noundef %.bound_tid.) #1 {
+entry:
+  %.global_tid..addr = alloca ptr, align 8
+  %.bound_tid..addr = alloca ptr, align 8
+  %sum = alloca i32, align 4
+  %allocapt = bitcast i32 undef to i32
+  store ptr %.global_tid., ptr %.global_tid..addr, align 8
+  store ptr %.bound_tid., ptr %.bound_tid..addr, align 8
+  store i32 0, ptr %sum, align 4
+  br label %omp.loop.distance
+
+omp.loop.distance:                                ; preds = %entry
+  br label %omp.reduction.prolog
+
+omp.reduction.prolog:                             ; preds = %omp.loop.distance
+  br label %omp.loop.entry
+
+omp.loop.entry:                                   ; preds = %omp.reduction.prolog
+  br label %omp.loop.region
+
+omp.loop.region:                                  ; preds = %omp.loop.entry
+  br label %omp.loop.pre_finalize
+
+omp.loop.pre_finalize:                            ; preds = %omp.loop.region
+  br label %omp.loop.exit
+
+omp.loop.exit:                                    ; preds = %omp.loop.pre_finalize
+  unreachable
+}
+
+Here's the vardecl: __context
+End of finalize
+; Function Attrs: convergent noinline nounwind optnone
+define internal void @__captured_stmt(ptr noundef nonnull align 4 dereferenceable(4) %Distance, ptr noalias noundef %__context) #2 {
+entry:
+  %Distance.addr = alloca ptr, align 8
+  %__context.addr = alloca ptr, align 8
+  %.start = alloca i32, align 4
+  %.stop = alloca i32, align 4
+  %.step = alloca i32, align 4
+  store ptr %Distance, ptr %Distance.addr, align 8
+  store ptr %__context, ptr %__context.addr, align 8
+  %0 = load ptr, ptr %__context.addr, align 8
+  %1 = getelementptr inbounds %struct.anon, ptr %0, i32 0, i32 0
+  %2 = load ptr, ptr %1, align 8
+  %3 = load i32, ptr %2, align 4
+  store i32 %3, ptr %.start, align 4
+  store i32 32, ptr %.stop, align 4
+  store i32 1, ptr %.step, align 4
+  %4 = load i32, ptr %.start, align 4
+  %5 = load i32, ptr %.stop, align 4
+  %cmp = icmp slt i32 %4, %5
+  br i1 %cmp, label %cond.true, label %cond.false
+
+cond.true:                                        ; preds = %entry
+  %6 = load i32, ptr %.stop, align 4
+  %7 = load i32, ptr %.start, align 4
+  %sub = sub nsw i32 %6, %7
+  %8 = load i32, ptr %.step, align 4
+  %sub1 = sub i32 %8, 1
+  %add = add i32 %sub, %sub1
+  %9 = load i32, ptr %.step, align 4
+  %div = udiv i32 %add, %9
+  br label %cond.end
+
+cond.false:                                       ; preds = %entry
+  br label %cond.end
+
+cond.end:                                         ; preds = %cond.false, %cond.true
+  %cond = phi i32 [ %div, %cond.true ], [ 0, %cond.false ]
+  %10 = load ptr, ptr %Distance.addr, align 8
+  store i32 %cond, ptr %10, align 4
+  ret void
+}
+
+Before body codegen:
+; Function Attrs: convergent noinline norecurse nounwind optnone
+define internal void @__omp_offloading_50_239ef55_main_l6_omp_outlined(ptr noalias noundef %.global_tid., ptr noalias noundef %.bound_tid.) #1 {
+entry:
+  %.global_tid..addr = alloca ptr, align 8
+  %.bound_tid..addr = alloca ptr, align 8
+  %sum = alloca i32, align 4
+  %i = alloca i32, align 4
+  %agg.captured = alloca %struct.anon, align 8
+  %.count.addr = alloca i32, align 4
+  %omp.iv.tmp = alloca i32, align 4
+  %omp.iv = load i32, ptr %omp.iv.tmp, align 4
+  %allocapt = bitcast i32 undef to i32
+  store ptr %.global_tid., ptr %.global_tid..addr, align 8
+  store ptr %.bound_tid., ptr %.bound_tid..addr, align 8
+  store i32 0, ptr %sum, align 4
+  br label %omp.loop.distance
+
+omp.loop.distance:                                ; preds = %entry
+  store i32 0, ptr %i, align 4
+  %0 = getelementptr inbounds %struct.anon, ptr %agg.captured, i32 0, i32 0
+  store ptr %i, ptr %0, align 8
+  call void @__captured_stmt(ptr %.count.addr, ptr %agg.captured)
+  %.count = load i32, ptr %.count.addr, align 4
+  br label %omp.reduction.prolog
+
+omp.reduction.prolog:                             ; preds = %omp.loop.distance
+  br label %omp.loop.entry
+
+omp.loop.entry:                                   ; preds = %omp.reduction.prolog
+  %omp.iv.tobedeleted = add i32 %omp.iv, %omp.iv
+  br label %omp.loop.region
+
+omp.loop.region:                                  ; preds = %omp.loop.entry
+  br label %omp.loop.pre_finalize
+
+omp.loop.pre_finalize:                            ; preds = %omp.loop.region
+  br label %omp.loop.exit
+
+omp.loop.exit:                                    ; preds = %omp.loop.pre_finalize
+  unreachable
+}
+
+Here's the vardecl: sum
+AFter gen body
+; Function Attrs: convergent noinline norecurse nounwind optnone
+define internal void @__omp_offloading_50_239ef55_main_l6_omp_outlined(ptr noalias noundef %.global_tid., ptr noalias noundef %.bound_tid.) #1 {
+entry:
+  %.global_tid..addr = alloca ptr, align 8
+  %.bound_tid..addr = alloca ptr, align 8
+  %sum = alloca i32, align 4
+  %i = alloca i32, align 4
+  %agg.captured = alloca %struct.anon, align 8
+  %.count.addr = alloca i32, align 4
+  %omp.iv.tmp = alloca i32, align 4
+  %omp.iv = load i32, ptr %omp.iv.tmp, align 4
+  %allocapt = bitcast i32 undef to i32
+  store ptr %.global_tid., ptr %.global_tid..addr, align 8
+  store ptr %.bound_tid., ptr %.bound_tid..addr, align 8
+  store i32 0, ptr %sum, align 4
+  br label %omp.loop.distance
+
+omp.loop.distance:                                ; preds = %entry
+  store i32 0, ptr %i, align 4
+  %0 = getelementptr inbounds %struct.anon, ptr %agg.captured, i32 0, i32 0
+  store ptr %i, ptr %0, align 8
+  call void @__captured_stmt(ptr %.count.addr, ptr %agg.captured)
+  %.count = load i32, ptr %.count.addr, align 4
+  br label %omp.reduction.prolog
+
+omp.reduction.prolog:                             ; preds = %omp.loop.distance
+  %sum1 = alloca i32, align 4
+  store i32 0, ptr %sum1, align 4
+  br label %omp.loop.entry
+
+omp.loop.entry:                                   ; preds = %omp.reduction.prolog
+  %omp.iv.tobedeleted = add i32 %omp.iv, %omp.iv
+  br label %omp.loop.region
+
+omp.loop.region:                                  ; preds = %omp.loop.entry
+  %1 = load i32, ptr %sum, align 4
+  %inc = add nsw i32 %1, 1
+  store i32 %inc, ptr %sum, align 4
+  br label %omp.loop.region.simd.after
+
+omp.loop.region.simd.after:                       ; preds = %omp.loop.region
+  br label %omp.loop.pre_finalize
+
+omp.loop.pre_finalize:                            ; preds = %omp.loop.region.simd.after
+  br label %omp.loop.exit
+
+omp.loop.exit:                                    ; preds = %omp.loop.pre_finalize
+  unreachable
+}
+
+1
+2
+3
+Here's the vardecl: sum
+  Looking for - 0x10d92ab28
+  Found - sum 0x10d92a9d0
+  Found - .global_tid. 0x10d92a848
+  Found - i 0x10d92b000
+  Found - .bound_tid. 0x10d92a8b0
+  Found - sum 0x10d92aba8
+clang-19: /g/g0/wright117/workspace/llvm-simd/llvm-project/clang/lib/CodeGen/CodeGenFunction.h:2817: Address clang::CodeGen::CodeGenFunction::GetAddrOfLocalVar(const VarDecl *): Assertion `it != LocalDeclMap.end() && "Invalid argument to GetAddrOfLocalVar(), no decl!"' failed.
+PLEASE submit a bug report to https://github.com/llvm/llvm-project/issues/ and include the crash backtrace, preprocessed source, and associated run script.
+Stack dump:
+0.	Program arguments: /usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19 -cc1 -triple nvptx64-nvidia-cuda -aux-triple powerpc64le-unknown-linux-gnu -S -dumpdir a- -disable-free -clear-ast-before-backend -main-file-name reduc.c -mrelocation-model pic -pic-level 2 -fhalf-no-semantic-interposition -mframe-pointer=all -ffp-contract=on -fno-rounding-math -no-integrated-as -mlink-builtin-bitcode /usr/tce/packages/cuda/cuda-11.8.0/nvvm/libdevice/libdevice.10.bc -target-sdk-version=11.8 -mlink-builtin-bitcode /usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/../lib/powerpc64le-unknown-linux-gnu/libomptarget-nvptx-sm_70.bc -target-cpu sm_70 -target-feature +ptx78 -debugger-tuning=gdb -fno-dwarf-directory-asm -fdebug-compilation-dir=/g/g0/wright117/workspace/llvm-simd/llvm-project/simdtest -resource-dir /usr/WS2/wright117/llvm-simd/rzansel/llvm/lib/clang/19 -internal-isystem /usr/WS2/wright117/llvm-simd/rzansel/llvm/lib/clang/19/include/llvm_libc_wrappers -internal-isystem /usr/WS2/wright117/llvm-simd/rzansel/llvm/lib/clang/19/include/openmp_wrappers -include __clang_openmp_device_functions.h -internal-isystem /usr/WS2/wright117/llvm-simd/rzansel/llvm/lib/clang/19/include/ppc_wrappers -internal-isystem /usr/WS2/wright117/llvm-simd/rzansel/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /opt/rh/devtoolset-12/root/usr/lib/gcc/ppc64le-redhat-linux/12/../../../../ppc64le-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -internal-isystem /usr/tce/packages/cuda/cuda-11.8.0/include -internal-isystem /usr/WS2/wright117/llvm-simd/rzansel/llvm/lib/clang/19/include/ppc_wrappers -internal-isystem /usr/WS2/wright117/llvm-simd/rzansel/llvm/lib/clang/19/include -internal-isystem /usr/local/include -internal-isystem /opt/rh/devtoolset-12/root/usr/lib/gcc/ppc64le-redhat-linux/12/../../../../ppc64le-redhat-linux/include -internal-externc-isystem /include -internal-externc-isystem /usr/include -ferror-limit 19 -fvisibility=protected -fopenmp -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fopenmp-is-target-device -fopenmp-host-ir-file-path /var/tmp/reduc-45af72.bc -o /var/tmp/reduc-5f9854.s -x c reduc.c
+1.	<eof> parser at end of file
+2.	reduc.c:4:5: LLVM IR generation of declaration 'main'
+3.	reduc.c:7:3: LLVM IR generation of compound statement ('{}')
+ #0 0x00000001041a28cc llvm::sys::PrintStackTrace(llvm::raw_ostream&, int) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x41a28cc)
+ #1 0x00000001041a3014 PrintStackTraceSignalHandler(void*) Signals.cpp:0:0
+ #2 0x000000010419f6d0 llvm::sys::RunSignalHandlers() (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x419f6d0)
+ #3 0x00000001041a32fc SignalHandler(int) Signals.cpp:0:0
+ #4 0x00002000000504d8 (+0x4d8)
+ #5 0x00002000004f2134 abort /usr/src/debug/glibc-2.17-c758a686/stdlib/abort.c:75:0
+ #6 0x00002000004e57d4 __assert_fail_base /usr/src/debug/glibc-2.17-c758a686/assert/assert.c:92:0
+ #7 0x00002000004e58c4 __assert_fail /usr/src/debug/glibc-2.17-c758a686/assert/assert.c:101:0
+ #8 0x00000001044e252c clang::CodeGen::CodeGenFunction::GetAddrOfLocalVar(clang::VarDecl const*) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x44e252c)
+ #9 0x0000000104a4694c clang::CodeGen::CGOpenMPRuntimeGPU::emitReduction(clang::CodeGen::CodeGenFunction&, clang::SourceLocation, llvm::ArrayRef<clang::Expr const*>, llvm::ArrayRef<clang::Expr const*>, llvm::ArrayRef<clang::Expr const*>, llvm::ArrayRef<clang::Expr const*>, clang::CodeGen::CGOpenMPRuntime::ReductionOptionsTy) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x4a4694c)
+#10 0x00000001045129b0 clang::CodeGen::CodeGenFunction::EmitOMPReductionClauseFinal(clang::OMPExecutableDirective const&, llvm::omp::Directive) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x45129b0)
+#11 0x0000000104547f04 void llvm::function_ref<void (llvm::IRBuilderBase::InsertPoint, llvm::IRBuilderBase::InsertPoint, llvm::IRBuilderBase::InsertPoint, llvm::IRBuilderBase::InsertPoint, llvm::Value*)>::callback_fn<clang::CodeGen::CodeGenFunction::EmitOMPSimdDirective(clang::OMPSimdDirective const&)::$_3>(long, llvm::IRBuilderBase::InsertPoint, llvm::IRBuilderBase::InsertPoint, llvm::IRBuilderBase::InsertPoint, llvm::IRBuilderBase::InsertPoint, llvm::Value*) CGStmtOpenMP.cpp:0:0
+#12 0x0000000108695370 llvm::OpenMPIRBuilder::createSimdLoop(llvm::OpenMPIRBuilder::LocationDescription const&, llvm::IRBuilderBase::InsertPoint, llvm::function_ref<void (llvm::IRBuilderBase::InsertPoint, llvm::IRBuilderBase::InsertPoint, llvm::IRBuilderBase::InsertPoint, llvm::IRBuilderBase::InsertPoint, llvm::Value*)>, llvm::function_ref<llvm::Value* (llvm::IRBuilderBase::InsertPoint)>, llvm::function_ref<llvm::IRBuilderBase::InsertPoint (llvm::IRBuilderBase::InsertPoint, llvm::IRBuilderBase::InsertPoint, llvm::Value&, llvm::Value&, llvm::Value*&)>, std::function<void (llvm::IRBuilderBase::InsertPoint)>) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x8695370)
+#13 0x000000010451bce8 clang::CodeGen::CodeGenFunction::EmitOMPSimdDirective(clang::OMPSimdDirective const&) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x451bce8)
+#14 0x00000001044eda90 clang::CodeGen::CodeGenFunction::EmitStmt(clang::Stmt const*, llvm::ArrayRef<clang::Attr const*>) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x44eda90)
+#15 0x00000001044ee214 clang::CodeGen::CodeGenFunction::EmitSimpleStmt(clang::Stmt const*, llvm::ArrayRef<clang::Attr const*>) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x44ee214)
+#16 0x00000001044ed3b0 clang::CodeGen::CodeGenFunction::EmitStmt(clang::Stmt const*, llvm::ArrayRef<clang::Attr const*>) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x44ed3b0)
+#17 0x0000000104561128 void clang::CodeGen::RegionCodeGenTy::CallbackFn<emitTargetParallelRegion(clang::CodeGen::CodeGenFunction&, clang::OMPTargetParallelDirective const&, clang::CodeGen::PrePostActionTy&)::$_0>(long, clang::CodeGen::CodeGenFunction&, clang::CodeGen::PrePostActionTy&) CGStmtOpenMP.cpp:0:0
+#18 0x0000000104a128cc (anonymous namespace)::CGOpenMPRegionInfo::EmitBody(clang::CodeGen::CodeGenFunction&, clang::Stmt const*) CGOpenMPRuntime.cpp:0:0
+#19 0x0000000104508070 clang::CodeGen::CodeGenFunction::GenerateOpenMPCapturedStmtFunction(clang::CapturedStmt const&, clang::SourceLocation) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x4508070)
+#20 0x00000001049d3af0 emitParallelOrTeamsOutlinedFunction(clang::CodeGen::CodeGenModule&, clang::OMPExecutableDirective const&, clang::CapturedStmt const*, clang::VarDecl const*, llvm::omp::Directive, llvm::StringRef, clang::CodeGen::RegionCodeGenTy const&) CGOpenMPRuntime.cpp:0:0
+#21 0x00000001049d37e8 clang::CodeGen::CGOpenMPRuntime::emitParallelOutlinedFunction(clang::CodeGen::CodeGenFunction&, clang::OMPExecutableDirective const&, clang::VarDecl const*, llvm::omp::Directive, clang::CodeGen::RegionCodeGenTy const&) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x49d37e8)
+#22 0x0000000104a424c0 clang::CodeGen::CGOpenMPRuntimeGPU::emitParallelOutlinedFunction(clang::CodeGen::CodeGenFunction&, clang::OMPExecutableDirective const&, clang::VarDecl const*, llvm::omp::Directive, clang::CodeGen::RegionCodeGenTy const&) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x4a424c0)
+#23 0x0000000104514e0c emitCommonOMPParallelDirective(clang::CodeGen::CodeGenFunction&, clang::OMPExecutableDirective const&, llvm::omp::Directive, clang::CodeGen::RegionCodeGenTy const&, llvm::function_ref<void (clang::CodeGen::CodeGenFunction&, clang::OMPExecutableDirective const&, llvm::SmallVectorImpl<llvm::Value*>&)> const&) CGStmtOpenMP.cpp:0:0
+#24 0x0000000104560e14 emitTargetParallelRegion(clang::CodeGen::CodeGenFunction&, clang::OMPTargetParallelDirective const&, clang::CodeGen::PrePostActionTy&) CGStmtOpenMP.cpp:0:0
+#25 0x0000000104a128cc (anonymous namespace)::CGOpenMPRegionInfo::EmitBody(clang::CodeGen::CodeGenFunction&, clang::Stmt const*) CGOpenMPRuntime.cpp:0:0
+#26 0x0000000104508070 clang::CodeGen::CodeGenFunction::GenerateOpenMPCapturedStmtFunction(clang::CapturedStmt const&, clang::SourceLocation) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x4508070)
+#27 0x0000000104a294fc std::_Function_handler<llvm::Function* (llvm::StringRef), clang::CodeGen::CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(clang::OMPExecutableDirective const&, llvm::StringRef, llvm::Function*&, llvm::Constant*&, bool, clang::CodeGen::RegionCodeGenTy const&)::$_0>::_M_invoke(std::_Any_data const&, llvm::StringRef&&) CGOpenMPRuntime.cpp:0:0
+#28 0x00000001086c0bd8 llvm::OpenMPIRBuilder::emitTargetRegionFunction(llvm::TargetRegionEntryInfo&, std::function<llvm::Function* (llvm::StringRef)>&, bool, llvm::Function*&, llvm::Constant*&) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x86c0bd8)
+#29 0x00000001049f8f3c clang::CodeGen::CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(clang::OMPExecutableDirective const&, llvm::StringRef, llvm::Function*&, llvm::Constant*&, bool, clang::CodeGen::RegionCodeGenTy const&) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x49f8f3c)
+#30 0x0000000104a420b8 clang::CodeGen::CGOpenMPRuntimeGPU::emitTargetOutlinedFunction(clang::OMPExecutableDirective const&, llvm::StringRef, llvm::Function*&, llvm::Constant*&, bool, clang::CodeGen::RegionCodeGenTy const&) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x4a420b8)
+#31 0x0000000104538934 clang::CodeGen::CodeGenFunction::EmitOMPTargetParallelDeviceFunction(clang::CodeGen::CodeGenModule&, llvm::StringRef, clang::OMPTargetParallelDirective const&) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x4538934)
+#32 0x0000000104a00a20 clang::CodeGen::CGOpenMPRuntime::scanForTargetRegionsFunctions(clang::Stmt const*, llvm::StringRef) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x4a00a20)
+#33 0x0000000104a0087c clang::CodeGen::CGOpenMPRuntime::scanForTargetRegionsFunctions(clang::Stmt const*, llvm::StringRef) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x4a0087c)
+#34 0x0000000104a00f98 clang::CodeGen::CGOpenMPRuntime::emitTargetFunctions(clang::GlobalDecl) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x4a00f98)
+#35 0x0000000104a01ce0 clang::CodeGen::CGOpenMPRuntime::emitTargetGlobal(clang::GlobalDecl) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x4a01ce0)
+#36 0x00000001045ac088 clang::CodeGen::CodeGenModule::EmitGlobal(clang::GlobalDecl) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x45ac088)
+#37 0x00000001045a51d8 clang::CodeGen::CodeGenModule::EmitTopLevelDecl(clang::Decl*) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x45a51d8)
+#38 0x0000000104a6420c (anonymous namespace)::CodeGeneratorImpl::HandleTopLevelDecl(clang::DeclGroupRef) ModuleBuilder.cpp:0:0
+#39 0x0000000104a54008 clang::BackendConsumer::HandleTopLevelDecl(clang::DeclGroupRef) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x4a54008)
+#40 0x0000000106ae531c clang::ParseAST(clang::Sema&, bool, bool) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x6ae531c)
+#41 0x0000000104d12d9c clang::ASTFrontendAction::ExecuteAction() (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x4d12d9c)
+#42 0x0000000104a5dce0 clang::CodeGenAction::ExecuteAction() (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x4a5dce0)
+#43 0x0000000104d122bc clang::FrontendAction::Execute() (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x4d122bc)
+#44 0x0000000104c66690 clang::CompilerInstance::ExecuteAction(clang::FrontendAction&) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x4c66690)
+#45 0x0000000104e2cefc clang::ExecuteCompilerInvocation(clang::CompilerInstance*) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x4e2cefc)
+#46 0x000000010135f950 cc1_main(llvm::ArrayRef<char const*>, char const*, void*) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x135f950)
+#47 0x000000010135ae24 ExecuteCC1Tool(llvm::SmallVectorImpl<char const*>&, llvm::ToolContext const&) driver.cpp:0:0
+#48 0x00000001013598e0 clang_main(int, char**, llvm::ToolContext const&) (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x13598e0)
+#49 0x0000000101370344 main (/usr/WS2/wright117/llvm-simd/rzansel/llvm/bin/clang-19+0x1370344)
+#50 0x00002000004d5300 generic_start_main.isra.0 /usr/src/debug/glibc-2.17-c758a686/csu/../csu/libc-start.c:266:0
+#51 0x00002000004d54f4 __libc_start_main /usr/src/debug/glibc-2.17-c758a686/csu/../sysdeps/unix/sysv/linux/powerpc/libc-start.c:81:0
+clang: error: unable to execute command: Aborted
+clang: error: clang frontend command failed due to signal (use -v to see invocation)
+clang version 19.0.0git (https://github.com/efwright/llvm-project.git 55465ae477b156894e37c7f02167ae0989b33b49)
+Target: powerpc64le-unknown-linux-gnu
+Thread model: posix
+InstalledDir: /usr/WS2/wright117/llvm-simd/rzansel/llvm/bin
+clang: note: diagnostic msg: 
+********************
+
+PLEASE ATTACH THE FOLLOWING FILES TO THE BUG REPORT:
+Preprocessed source(s) and associated run script(s) are located at:
+clang: note: diagnostic msg: /var/tmp/reduc-e84709.c
+clang: note: diagnostic msg: /var/tmp/reduc-c442c4.c
+clang: note: diagnostic msg: /var/tmp/reduc-e84709.sh
+clang: note: diagnostic msg: 
+
+********************

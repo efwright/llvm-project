@@ -1432,7 +1432,7 @@ void CodeGenFunction::EmitOMPReductionClauseFinal(
     bool WithNowait = D.getSingleClause<OMPNowaitClause>() ||
                       isOpenMPParallelDirective(D.getDirectiveKind()) ||
                       ReductionKind == OMPD_simd;
-    bool SimpleReduction = ReductionKind == OMPD_simd;
+    bool SimpleReduction = (CGM.getLangOpts().OpenMPIsTargetDevice ? false : ReductionKind == OMPD_simd);
     // Emit nowait reduction if nowait clause is present or directive is a
     // parallel directive (it always has implicit barrier).
     CGM.getOpenMPRuntime().emitReduction(
@@ -2724,9 +2724,26 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
 
     auto BodyGenCB = [&]
                      (InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
+                      InsertPointTy ReductionProlog, InsertPointTy ReductionEpilog,
                       llvm::Value *Virtual) {
 
+      Builder.restoreIP(CodeGenIP);
+
+
+      {
+        Builder.restoreIP(ReductionProlog);
+        OMPBuilderCBHelpers::OutlinedRegionBodyRAII IRB(*this, ReductionProlog, *(ReductionEpilog.getBlock()));
+
+        OMPPrivateScope PrivateScope(*this);
+        EmitOMPFirstprivateClause(S, PrivateScope);
+        EmitOMPPrivateClause(S, PrivateScope);
+
+        EmitOMPReductionClauseInit(S, PrivateScope);
+        PrivateScope.Privatize();
+      }
+
       llvm::BasicBlock *CodeGenIPBB = CodeGenIP.getBlock();
+      Builder.restoreIP(CodeGenIP);
 
       // Generate the body of the loop
       OMPBuilderCBHelpers::EmitOMPOutlinedRegionBody(
@@ -2735,6 +2752,21 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
           AllocaIP,
           CodeGenIP,
           "simd");
+
+      llvm::dbgs() << "AFter gen body\n";
+      llvm::dbgs() << *(CodeGenIPBB->getParent()) << "\n";
+
+      {
+        llvm::dbgs() << "1\n";
+       llvm::dbgs() << "2\n";
+        OMPBuilderCBHelpers::OutlinedRegionBodyRAII IRB(*this, ReductionProlog, *(ReductionEpilog.getBlock()));
+        Builder.restoreIP(ReductionEpilog);
+        llvm::dbgs() << "3\n";
+        EmitOMPReductionClauseFinal(S, OMPD_simd);
+        llvm::dbgs() << "4\n";
+      }
+
+      //Builder.restoreIP(CodeGenIP);
 
       // The loop variable referenced in the body is allocated outside of the
       // outlined region. Here we create a new privitized copy of the loop
@@ -2787,6 +2819,11 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
       Builder.SetInsertPoint(CodeGenIPBB, CodeGenIPBB->begin());
       emitCapturedStmtCall(*this, LoopVarClosure,
                            {NewLoopVar, Virtual});
+
+    };
+
+    auto ReductionGenCB = [&](InsertPointTy PrologIP, InsertPointTy EpilogIP)
+    {
 
     };
 

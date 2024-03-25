@@ -569,7 +569,9 @@ public:
 
   using LoopBodyCallbackTy =
       function_ref<void(
-        InsertPointTy AllocaIP, InsertPointTy CodeGenIP, Value *IterationNum
+        InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
+        InsertPointTy ReductionPrologIP, InsertPointTy ReductionEpilogIP,
+        Value *IterationNum
       )>;
 
   using TripCountCallbackTy =
