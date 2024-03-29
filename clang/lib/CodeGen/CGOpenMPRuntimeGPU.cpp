@@ -1667,6 +1667,12 @@ void CGOpenMPRuntimeGPU::emitReduction(
   bool ParallelReduction = isOpenMPParallelDirective(Options.ReductionKind);
   bool DistributeReduction = isOpenMPDistributeDirective(Options.ReductionKind);
   bool TeamsReduction = isOpenMPTeamsDirective(Options.ReductionKind);
+  bool SimdReduction = isOpenMPSimdDirective(Options.ReductionKind);
+
+  if(SimdReduction)
+    llvm::dbgs() << "SIMD REDUCTION\n";
+  else
+    llvm::dbgs() << "NOT SIMD REDUCTION\n";
 
   ASTContext &C = CGM.getContext();
 
@@ -1746,7 +1752,7 @@ void CGOpenMPRuntimeGPU::emitReduction(
 
   CGF.Builder.restoreIP(OMPBuilder.createReductionsGPU(
       OmpLoc, AllocaIP, CodeGenIP, ReductionInfos, false, TeamsReduction,
-      DistributeReduction, llvm::OpenMPIRBuilder::ReductionGenCBTy::Clang,
+      DistributeReduction, SimdReduction, llvm::OpenMPIRBuilder::ReductionGenCBTy::Clang,
       CGF.getTarget().getGridValue(), C.getLangOpts().OpenMPCUDAReductionBufNum,
       RTLoc));
   return;

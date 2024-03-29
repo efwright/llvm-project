@@ -569,7 +569,7 @@ public:
 
   using LoopBodyCallbackTy =
       function_ref<void(
-        InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
+        InsertPointTy OuterAllocaIP, InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
         InsertPointTy ReductionPrologIP, InsertPointTy ReductionEpilogIP,
         Value *IterationNum
       )>;
@@ -1867,6 +1867,7 @@ public:
       InsertPointTy CodeGenIP, ArrayRef<ReductionInfo> ReductionInfos,
       bool IsNoWait = false, bool IsTeamsReduction = false,
       bool HasDistribute = false,
+      bool IsSimdReduction = false,
       ReductionGenCBTy ReductionGenCBTy = ReductionGenCBTy::MLIR,
       std::optional<omp::GV> GridValue = {}, unsigned ReductionBufNum = 1024,
       Value *SrcLocInfo = nullptr);

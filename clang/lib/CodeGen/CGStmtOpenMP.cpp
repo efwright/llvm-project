@@ -1395,6 +1395,7 @@ void CodeGenFunction::EmitOMPReductionClauseInit(
     }
 
     const auto *VD = cast<VarDecl>(cast<DeclRefExpr>(TaskRedRef)->getDecl());
+llvm::dbgs() << "Emitting " << VD->getName() << " " << VD << "\n";
     EmitVarDecl(*VD);
     EmitStoreOfScalar(ReductionDesc, GetAddrOfLocalVar(VD),
                       /*Volatile=*/false, TaskRedRef->getType());
@@ -2682,6 +2683,8 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
     llvm::Value *LoopVar;
     std::string LoopVarName;
     auto DistanceCB = [&](InsertPointTy CodeGenIP) -> llvm::Value* {
+      OMPBuilderCBHelpers::OutlinedRegionBodyRAII IRB(
+        *this, CodeGenIP, *(CodeGenIP.getBlock()));
       Builder.restoreIP(CodeGenIP);
 
       // Emit the loop variable, needed for the distance func
@@ -2723,27 +2726,55 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
     };
 
     auto BodyGenCB = [&]
-                     (InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
+                     (InsertPointTy OuterAllocaIP,
+                      InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
                       InsertPointTy ReductionProlog, InsertPointTy ReductionEpilog,
                       llvm::Value *Virtual) {
 
-      Builder.restoreIP(CodeGenIP);
-
-
-      {
-        Builder.restoreIP(ReductionProlog);
-        OMPBuilderCBHelpers::OutlinedRegionBodyRAII IRB(*this, ReductionProlog, *(ReductionEpilog.getBlock()));
-
-        OMPPrivateScope PrivateScope(*this);
-        EmitOMPFirstprivateClause(S, PrivateScope);
-        EmitOMPPrivateClause(S, PrivateScope);
-
-        EmitOMPReductionClauseInit(S, PrivateScope);
-        PrivateScope.Privatize();
-      }
-
       llvm::BasicBlock *CodeGenIPBB = CodeGenIP.getBlock();
-      Builder.restoreIP(CodeGenIP);
+
+      OMPBuilderCBHelpers::OutlinedRegionBodyRAII IRB(
+        *this, OuterAllocaIP, *(ReductionProlog.getBlock()));
+      Builder.restoreIP(ReductionProlog);
+
+
+//      {
+//        Builder.restoreIP(ReductionProlog);
+//        OMPBuilderCBHelpers::OutlinedRegionBodyRAII IRB(*this, ReductionProlog, *(ReductionEpilog.getBlock()));
+
+//        OMPPrivateScope PrivateScope(*this);
+//        EmitOMPFirstprivateClause(S, PrivateScope);
+//        EmitOMPPrivateClause(S, PrivateScope);
+
+//        EmitOMPReductionClauseInit(S, PrivateScope);
+
+//        PrivateScope.Privatize();
+
+      OMPPrivateScope PrivateScope(*this);
+      EmitOMPFirstprivateClause(S, PrivateScope);
+      EmitOMPPrivateClause(S, PrivateScope);
+
+      //{
+        //llvm::IRBuilder<>::InsertPointGuard IPG(Builder);
+        //Builder.restoreIP(ReductionProlog);
+        //OMPBuilderCBHelpers::OutlinedRegionBodyRAII IRB(*this, ReductionProlog, *(ReductionEpilog.getBlock()));
+        EmitOMPReductionClauseInit(S, PrivateScope);
+      //}
+
+      PrivateScope.Privatize();
+
+
+     //Builder.restoreIP(CodeGenIP);
+     //llvm::IRBuilder<>::InsertPointGuard IPG(Builder);
+     //Builder.restoreIP(ReductionProlog);
+     const CapturedStmt *LoopVarFunc = CL->getLoopVarFunc();
+     EmittedClosureTy LoopVarClosure = emitCapturedStmtFunc(*this, LoopVarFunc);
+     //Builder.SetInsertPoint(CodeGenIPBB, CodeGenIPBB->begin());
+ 
+
+    Builder.restoreIP(CodeGenIP);
+    emitCapturedStmtCall(*this, LoopVarClosure,
+                           {LoopVar, Virtual});
 
       // Generate the body of the loop
       OMPBuilderCBHelpers::EmitOMPOutlinedRegionBody(
@@ -2753,72 +2784,100 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
           CodeGenIP,
           "simd");
 
+
+
       llvm::dbgs() << "AFter gen body\n";
       llvm::dbgs() << *(CodeGenIPBB->getParent()) << "\n";
 
-      {
+      //{
         llvm::dbgs() << "1\n";
+
+       llvm::BasicBlock *RedEpilogBB = ReductionEpilog.getBlock();
+       llvm::Instruction *RedEpilogTerminator = RedEpilogBB->getTerminator();
+       llvm::BasicBlock *FinalBlock = RedEpilogBB->getSingleSuccessor();
+       llvm::dbgs() << *FinalBlock << "\n";
+       llvm::dbgs() << *RedEpilogTerminator << "\n";
+       //RedEpilogTerminator->removeFromParent();
+
        llvm::dbgs() << "2\n";
-        OMPBuilderCBHelpers::OutlinedRegionBodyRAII IRB(*this, ReductionProlog, *(ReductionEpilog.getBlock()));
+      //  OMPBuilderCBHelpers::OutlinedRegionBodyRAII IRB(*this, ReductionProlog, *(ReductionEpilog.getBlock()));
         Builder.restoreIP(ReductionEpilog);
         llvm::dbgs() << "3\n";
         EmitOMPReductionClauseFinal(S, OMPD_simd);
         llvm::dbgs() << "4\n";
-      }
 
-      //Builder.restoreIP(CodeGenIP);
+        llvm::BasicBlock *ReductionThenBB = Builder.GetInsertBlock();
+        llvm::dbgs() << "ThenBB = " << *ReductionThenBB << "\n";
+
+        //auto RedIT = ReductionThenBB->end();
+
+        //llvm::dbgs() << "The parent = " << *(RedIT->getParent()) << "\n";
+
+        //llvm::dbgs() << "BLOCK\n" << *ReductionThenBB << "\n";
+
+        //RedEpilogTerminator->insertInto(ReductionThenBB, ReductionThenBB->end());
+
+        if(!(ReductionThenBB->getTerminator())) {
+          llvm::dbgs() << "BANG!\n";
+          RedEpilogTerminator->eraseFromParent();
+          Builder.CreateBr(FinalBlock);
+        }
+
+      //}
+
+//      Builder.restoreIP(CodeGenIP);
 
       // The loop variable referenced in the body is allocated outside of the
       // outlined region. Here we create a new privitized copy of the loop
       // variable and replace all uses in the body with the private copy.
-      llvm::Value *NewLoopVar;
+//      llvm::Value *NewLoopVar;
 
       // The type of the new loop variable will be the same type
       // as the first parameter of the LoopVarFunc
-      const CapturedStmt *LoopVarFunc = CL->getLoopVarFunc();
-      QualType Ty = LoopVarFunc->getCapturedDecl()
-                               ->getParam(0)
-                               ->getType()
-                                .getNonReferenceType();
+//      const CapturedStmt *LoopVarFunc = CL->getLoopVarFunc();
+//      QualType Ty = LoopVarFunc->getCapturedDecl()
+//                               ->getParam(0)
+//                               ->getType()
+//                                .getNonReferenceType();
 
-      QualType Tytest = LoopVarFunc->getCapturedDecl()
-                               ->getParam(1)
-                               ->getType()
-                                .getNonReferenceType();
+//      QualType Tytest = LoopVarFunc->getCapturedDecl()
+//                               ->getParam(1)
+//                               ->getType()
+//                                .getNonReferenceType();
 
-      llvm::Type *allocaTy = ConvertTypeForMem(Ty);
+//      llvm::Type *allocaTy = ConvertTypeForMem(Ty);
 
       // Create the new Alloca
-      Builder.restoreIP(AllocaIP);
-      llvm::AllocaInst *NewLoopVarAlloca = Builder.CreateAlloca(
-        allocaTy, nullptr, LoopVarName+".loopvar"); 
-      NewLoopVar = NewLoopVarAlloca;
+//      Builder.restoreIP(AllocaIP);
+//      llvm::AllocaInst *NewLoopVarAlloca = Builder.CreateAlloca(
+//        allocaTy, nullptr, LoopVarName+".loopvar"); 
+//      NewLoopVar = NewLoopVarAlloca;
 
       // If the alloca is not in the default address space, cast it
-      if(getASTAllocaAddressSpace() != LangAS::Default)
-        NewLoopVar = Builder.CreateAddrSpaceCast(
-          NewLoopVarAlloca,
-          allocaTy->getPointerTo(getContext().getTargetAddressSpace(LangAS::Default)),
-          NewLoopVarAlloca->getName() + ".ascast"
-      ); 
+//      if(getASTAllocaAddressSpace() != LangAS::Default)
+//        NewLoopVar = Builder.CreateAddrSpaceCast(
+//          NewLoopVarAlloca,
+//          allocaTy->getPointerTo(getContext().getTargetAddressSpace(LangAS::Default)),
+//          NewLoopVarAlloca->getName() + ".ascast"
+//      ); 
 
       // Replaces uses of LoopVar with the new privitized variable
-      for(llvm::User *U : LoopVar->users()) {
-        if(auto I = dyn_cast<llvm::Instruction>(U)) {
-          if(I->getParent() == CodeGenIPBB) {
-            U->replaceUsesOfWith(LoopVar, NewLoopVar);
-          }
-        }
-      }
+//      for(llvm::User *U : LoopVar->users()) {
+//        if(auto I = dyn_cast<llvm::Instruction>(U)) {
+//          if(I->getParent() == CodeGenIPBB) {
+//            U->replaceUsesOfWith(LoopVar, NewLoopVar);
+//          }
+//        }
+//      }
  
      // Emit the function for determining the loop variable's value based on the
      // omp.iv. This is intentionally done here because the function will reference
      // both the previous loop variable (allocated during trip count calculation) 
      // and the newly created loop variable.
-     EmittedClosureTy LoopVarClosure = emitCapturedStmtFunc(*this, LoopVarFunc);
-      Builder.SetInsertPoint(CodeGenIPBB, CodeGenIPBB->begin());
-      emitCapturedStmtCall(*this, LoopVarClosure,
-                           {NewLoopVar, Virtual});
+//     EmittedClosureTy LoopVarClosure = emitCapturedStmtFunc(*this, LoopVarFunc);
+//      Builder.SetInsertPoint(CodeGenIPBB, CodeGenIPBB->begin());
+//      emitCapturedStmtCall(*this, LoopVarClosure,
+//                           {NewLoopVar, Virtual});
 
     };
 

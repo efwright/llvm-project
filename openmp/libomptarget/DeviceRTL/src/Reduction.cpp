@@ -167,6 +167,14 @@ uint32_t kmpcMin(uint32_t x, uint32_t y) { return x < y ? x : y; }
 } // namespace
 
 extern "C" {
+int32_t __kmpc_nvptx_simd_reduce_nowait_v2(IdentTy *Loc,
+                                           uint64_t reduce_data_size,
+                                           void *reduce_data,
+                                           ShuffleReductFnTy shflFct,
+                                           InterWarpCopyFnTy cpyFct) {
+  return 1;
+}
+
 int32_t __kmpc_nvptx_parallel_reduce_nowait_v2(IdentTy *Loc,
                                                uint64_t reduce_data_size,
                                                void *reduce_data,

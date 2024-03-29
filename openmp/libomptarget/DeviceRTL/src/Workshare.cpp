@@ -471,7 +471,7 @@ static void popDST() {
 template<typename IType>
 void SimdLoop(
   IdentTy *ident, void *WorkFn, IType TripCount,
-  void **Args, uint32_t nargs
+  void **Args
 ) {
   ASSERT(WorkFn, "expected valid outlined function"); 
   for(IType omp_iv = 0; omp_iv < TripCount; omp_iv++) {
@@ -649,16 +649,23 @@ void __kmpc_distribute_static_fini(IdentTy *loc, int32_t global_tid) {}
 
 void __kmpc_simd_4u(
   IdentTy *ident, void *WorkFn, uint32_t TripCount,
-  void **Args, uint32_t nargs
+  void **Args
 ) {
-  SimdLoop<uint32_t>(ident, WorkFn, TripCount, Args, nargs);
+  SimdLoop<uint32_t>(ident, WorkFn, TripCount, Args);
 }
 
 void __kmpc_simd_8u(
   IdentTy *ident, void *WorkFn, uint64_t TripCount,
-  void **Args, uint32_t nargs
+  void **Args
 ) {
-  SimdLoop<uint64_t>(ident, WorkFn, TripCount, Args, nargs);
+  SimdLoop<uint64_t>(ident, WorkFn, TripCount, Args);
+}
+
+void __kmpc_simd(
+  IdentTy *ident, void *WorkFn, void **Args, uint32_t nargs
+) {
+  ASSERT(WorkFn, "expected valid outlined function"); 
+  ((void (*)(void**))WorkFn)(Args);
 }
 
 }
