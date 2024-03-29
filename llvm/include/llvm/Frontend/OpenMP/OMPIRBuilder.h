@@ -569,14 +569,14 @@ public:
 
   using LoopBodyCallbackTy =
       function_ref<void(
-        InsertPointTy OuterAllocaIP, InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
-        InsertPointTy ReductionPrologIP, InsertPointTy ReductionEpilogIP,
+        BasicBlock *OuterAllocaBB, InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
+        InsertPointTy PrologIP, InsertPointTy ReductionEpilogIP,
         Value *IterationNum
       )>;
 
   using TripCountCallbackTy =
       function_ref<
-        Value*(InsertPointTy CodeGenIP)
+        Value*(llvm::BasicBlock *AllocaBB, InsertPointTy CodeGenIP)
       >;
 
   // This is created primarily for sections construct as llvm::function_ref

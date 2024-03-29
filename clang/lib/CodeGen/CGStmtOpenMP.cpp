@@ -2682,9 +2682,13 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
     // This function should assign values to the TripCount and Signed variables
     llvm::Value *LoopVar;
     std::string LoopVarName;
-    auto DistanceCB = [&](InsertPointTy CodeGenIP) -> llvm::Value* {
+    EmittedClosureTy LoopVarClosure;
+
+    auto DistanceCB = [&](llvm::BasicBlock *AllocaBB,
+                          InsertPointTy CodeGenIP) -> llvm::Value* {
+      InsertPointTy AllocaIP(AllocaBB, AllocaBB->getTerminator()->getIterator());
       OMPBuilderCBHelpers::OutlinedRegionBodyRAII IRB(
-        *this, CodeGenIP, *(CodeGenIP.getBlock()));
+        *this, AllocaIP, *(CodeGenIP.getBlock()));
       Builder.restoreIP(CodeGenIP);
 
       // Emit the loop variable, needed for the distance func
@@ -2712,6 +2716,9 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
       emitCapturedStmtCall(*this, DistanceClosure, {CountAddr.getPointer()});
       auto *TripCount = Builder.CreateLoad(CountAddr, ".count");
 
+      const CapturedStmt *LoopVarFunc = CL->getLoopVarFunc();
+      LoopVarClosure = emitCapturedStmtFunc(*this, LoopVarFunc);
+
       return TripCount;
     };
 
@@ -2726,54 +2733,29 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
     };
 
     auto BodyGenCB = [&]
-                     (InsertPointTy OuterAllocaIP,
+                     (//InsertPointTy OuterAllocaIP,
+                      llvm::BasicBlock *OuterAllocaBB,
                       InsertPointTy AllocaIP, InsertPointTy CodeGenIP,
-                      InsertPointTy ReductionProlog, InsertPointTy ReductionEpilog,
+                      InsertPointTy Prolog, InsertPointTy ReductionEpilog,
                       llvm::Value *Virtual) {
 
       llvm::BasicBlock *CodeGenIPBB = CodeGenIP.getBlock();
+      InsertPointTy OuterAllocaIP(OuterAllocaBB, OuterAllocaBB->getTerminator()->getIterator());
 
       OMPBuilderCBHelpers::OutlinedRegionBodyRAII IRB(
-        *this, OuterAllocaIP, *(ReductionProlog.getBlock()));
-      Builder.restoreIP(ReductionProlog);
-
-
-//      {
-//        Builder.restoreIP(ReductionProlog);
-//        OMPBuilderCBHelpers::OutlinedRegionBodyRAII IRB(*this, ReductionProlog, *(ReductionEpilog.getBlock()));
-
-//        OMPPrivateScope PrivateScope(*this);
-//        EmitOMPFirstprivateClause(S, PrivateScope);
-//        EmitOMPPrivateClause(S, PrivateScope);
-
-//        EmitOMPReductionClauseInit(S, PrivateScope);
-
-//        PrivateScope.Privatize();
+        *this, OuterAllocaIP, *(Prolog.getBlock()));
+      Builder.restoreIP(Prolog);
 
       OMPPrivateScope PrivateScope(*this);
       EmitOMPFirstprivateClause(S, PrivateScope);
       EmitOMPPrivateClause(S, PrivateScope);
-
-      //{
-        //llvm::IRBuilder<>::InsertPointGuard IPG(Builder);
-        //Builder.restoreIP(ReductionProlog);
-        //OMPBuilderCBHelpers::OutlinedRegionBodyRAII IRB(*this, ReductionProlog, *(ReductionEpilog.getBlock()));
-        EmitOMPReductionClauseInit(S, PrivateScope);
-      //}
-
+      EmitOMPReductionClauseInit(S, PrivateScope);
       PrivateScope.Privatize();
 
+      const CapturedStmt *LoopVarFunc = CL->getLoopVarFunc();
 
-     //Builder.restoreIP(CodeGenIP);
-     //llvm::IRBuilder<>::InsertPointGuard IPG(Builder);
-     //Builder.restoreIP(ReductionProlog);
-     const CapturedStmt *LoopVarFunc = CL->getLoopVarFunc();
-     EmittedClosureTy LoopVarClosure = emitCapturedStmtFunc(*this, LoopVarFunc);
-     //Builder.SetInsertPoint(CodeGenIPBB, CodeGenIPBB->begin());
- 
-
-    Builder.restoreIP(CodeGenIP);
-    emitCapturedStmtCall(*this, LoopVarClosure,
+      Builder.restoreIP(CodeGenIP);
+      emitCapturedStmtCall(*this, LoopVarClosure,
                            {LoopVar, Virtual});
 
       // Generate the body of the loop
@@ -2784,105 +2766,19 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
           CodeGenIP,
           "simd");
 
-
-
-      llvm::dbgs() << "AFter gen body\n";
-      llvm::dbgs() << *(CodeGenIPBB->getParent()) << "\n";
-
-      //{
-        llvm::dbgs() << "1\n";
-
        llvm::BasicBlock *RedEpilogBB = ReductionEpilog.getBlock();
        llvm::Instruction *RedEpilogTerminator = RedEpilogBB->getTerminator();
        llvm::BasicBlock *FinalBlock = RedEpilogBB->getSingleSuccessor();
-       llvm::dbgs() << *FinalBlock << "\n";
-       llvm::dbgs() << *RedEpilogTerminator << "\n";
-       //RedEpilogTerminator->removeFromParent();
 
-       llvm::dbgs() << "2\n";
-      //  OMPBuilderCBHelpers::OutlinedRegionBodyRAII IRB(*this, ReductionProlog, *(ReductionEpilog.getBlock()));
-        Builder.restoreIP(ReductionEpilog);
-        llvm::dbgs() << "3\n";
-        EmitOMPReductionClauseFinal(S, OMPD_simd);
-        llvm::dbgs() << "4\n";
+       Builder.restoreIP(ReductionEpilog);
+       EmitOMPReductionClauseFinal(S, OMPD_simd);
 
-        llvm::BasicBlock *ReductionThenBB = Builder.GetInsertBlock();
-        llvm::dbgs() << "ThenBB = " << *ReductionThenBB << "\n";
+       llvm::BasicBlock *ReductionThenBB = Builder.GetInsertBlock();
 
-        //auto RedIT = ReductionThenBB->end();
-
-        //llvm::dbgs() << "The parent = " << *(RedIT->getParent()) << "\n";
-
-        //llvm::dbgs() << "BLOCK\n" << *ReductionThenBB << "\n";
-
-        //RedEpilogTerminator->insertInto(ReductionThenBB, ReductionThenBB->end());
-
-        if(!(ReductionThenBB->getTerminator())) {
-          llvm::dbgs() << "BANG!\n";
-          RedEpilogTerminator->eraseFromParent();
-          Builder.CreateBr(FinalBlock);
-        }
-
-      //}
-
-//      Builder.restoreIP(CodeGenIP);
-
-      // The loop variable referenced in the body is allocated outside of the
-      // outlined region. Here we create a new privitized copy of the loop
-      // variable and replace all uses in the body with the private copy.
-//      llvm::Value *NewLoopVar;
-
-      // The type of the new loop variable will be the same type
-      // as the first parameter of the LoopVarFunc
-//      const CapturedStmt *LoopVarFunc = CL->getLoopVarFunc();
-//      QualType Ty = LoopVarFunc->getCapturedDecl()
-//                               ->getParam(0)
-//                               ->getType()
-//                                .getNonReferenceType();
-
-//      QualType Tytest = LoopVarFunc->getCapturedDecl()
-//                               ->getParam(1)
-//                               ->getType()
-//                                .getNonReferenceType();
-
-//      llvm::Type *allocaTy = ConvertTypeForMem(Ty);
-
-      // Create the new Alloca
-//      Builder.restoreIP(AllocaIP);
-//      llvm::AllocaInst *NewLoopVarAlloca = Builder.CreateAlloca(
-//        allocaTy, nullptr, LoopVarName+".loopvar"); 
-//      NewLoopVar = NewLoopVarAlloca;
-
-      // If the alloca is not in the default address space, cast it
-//      if(getASTAllocaAddressSpace() != LangAS::Default)
-//        NewLoopVar = Builder.CreateAddrSpaceCast(
-//          NewLoopVarAlloca,
-//          allocaTy->getPointerTo(getContext().getTargetAddressSpace(LangAS::Default)),
-//          NewLoopVarAlloca->getName() + ".ascast"
-//      ); 
-
-      // Replaces uses of LoopVar with the new privitized variable
-//      for(llvm::User *U : LoopVar->users()) {
-//        if(auto I = dyn_cast<llvm::Instruction>(U)) {
-//          if(I->getParent() == CodeGenIPBB) {
-//            U->replaceUsesOfWith(LoopVar, NewLoopVar);
-//          }
-//        }
-//      }
- 
-     // Emit the function for determining the loop variable's value based on the
-     // omp.iv. This is intentionally done here because the function will reference
-     // both the previous loop variable (allocated during trip count calculation) 
-     // and the newly created loop variable.
-//     EmittedClosureTy LoopVarClosure = emitCapturedStmtFunc(*this, LoopVarFunc);
-//      Builder.SetInsertPoint(CodeGenIPBB, CodeGenIPBB->begin());
-//      emitCapturedStmtCall(*this, LoopVarClosure,
-//                           {NewLoopVar, Virtual});
-
-    };
-
-    auto ReductionGenCB = [&](InsertPointTy PrologIP, InsertPointTy EpilogIP)
-    {
+       if(!(ReductionThenBB->getTerminator())) {
+         RedEpilogTerminator->eraseFromParent();
+         Builder.CreateBr(FinalBlock);
+       }
 
     };
 

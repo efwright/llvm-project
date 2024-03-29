@@ -2805,17 +2805,9 @@ public:
 
   /// GetAddrOfLocalVar - Return the address of a local variable.
   Address GetAddrOfLocalVar(const VarDecl *VD) {
-llvm::dbgs () << "Here's the vardecl: " << VD->getName() << "\n";
     auto it = LocalDeclMap.find(VD);
-    if(it == LocalDeclMap.end()) {
-llvm::dbgs() << "  Looking for - " << VD << "\n";
-      for(auto it = LocalDeclMap.begin(); it != LocalDeclMap.end(); it++) {
-        if(auto v = dyn_cast<VarDecl>(it->first))
-          llvm::dbgs() << "  Found - " << v->getName() << " " << v << "\n";
-      }
-      assert(it != LocalDeclMap.end() &&
-             "Invalid argument to GetAddrOfLocalVar(), no decl!");
-    }
+    assert(it != LocalDeclMap.end() &&
+           "Invalid argument to GetAddrOfLocalVar(), no decl!");
     return it->second;
   }
 

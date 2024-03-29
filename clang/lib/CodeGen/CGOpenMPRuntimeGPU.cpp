@@ -263,10 +263,6 @@ class CheckVarsEscapingDeclContext final
     if (!S)
       return;
 
-// DEBUG
-llvm::dbgs() << "VISITING..\n";
-S->dump();
-
     for (const CapturedStmt::Capture &C : S->captures()) {
       if (C.capturesVariable() && !C.capturesVariableByCopy()) {
         const ValueDecl *VD = C.getCapturedVar();
@@ -341,10 +337,6 @@ public:
       return;
     if (!D->hasAssociatedStmt())
       return;
-
-//DEBUG
-llvm::dbgs() << "DEBUG **\n";
-D->dump();
 
     if (const auto *S =
             dyn_cast_or_null<CapturedStmt>(D->getAssociatedStmt())) {
@@ -1668,11 +1660,6 @@ void CGOpenMPRuntimeGPU::emitReduction(
   bool DistributeReduction = isOpenMPDistributeDirective(Options.ReductionKind);
   bool TeamsReduction = isOpenMPTeamsDirective(Options.ReductionKind);
   bool SimdReduction = isOpenMPSimdDirective(Options.ReductionKind);
-
-  if(SimdReduction)
-    llvm::dbgs() << "SIMD REDUCTION\n";
-  else
-    llvm::dbgs() << "NOT SIMD REDUCTION\n";
 
   ASTContext &C = CGM.getContext();
 
