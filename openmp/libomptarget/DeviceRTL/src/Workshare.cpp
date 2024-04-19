@@ -474,14 +474,16 @@ void SimdLoop(
   void **Args
 ) {
   ASSERT(WorkFn, "expected valid outlined function"); 
-  //for(IType omp_iv = 0; omp_iv < TripCount; omp_iv++) {
+  __kmpc_impl_lanemask_t SimdMask = mapping::simdmask();
+  uint32_t Step = mapping::getSimdLen();
+  synchronize::warp(SimdMask);
   for(IType omp_iv = (IType) mapping::getSimdLane();
       omp_iv < TripCount;
-      omp_iv += mapping::getSimdLen()
+      omp_iv += Step
   ) {
     ((void (*)(IType, void**))WorkFn)(omp_iv, Args);
   }
-  
+  synchronize::warp(SimdMask);
 }
 
 extern "C" {
