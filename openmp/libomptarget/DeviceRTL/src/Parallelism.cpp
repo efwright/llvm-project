@@ -79,6 +79,11 @@ uint32_t determineNumberOfThreads(int32_t NumThreadsClause) {
   }
 }
 
+#ifndef SIMDLEN
+#define SIMDLEN 1
+#endif
+const uint32_t StaticSimdLen = SIMDLEN;
+
 } // namespace
 
 extern "C" {
@@ -89,6 +94,7 @@ extern "C" {
                                                    const int64_t nargs) {
   uint32_t TId = mapping::getThreadIdInBlock();
   uint32_t NumThreads = determineNumberOfThreads(num_threads);
+  NumThreads = NumThreads / StaticSimdLen;
   uint32_t PTeamSize =
       NumThreads == mapping::getMaxTeamThreads() ? 0 : NumThreads;
   // Avoid the race between the read of the `icv::Level` above and the write
@@ -101,6 +107,9 @@ extern "C" {
     state::ValueRAII ParallelTeamSizeRAII(state::ParallelTeamSize, PTeamSize,
                                           1u, TId == 0, ident,
                                           /*ForceTeamState=*/true);
+    state::ValueRAII SimdLengthRAII(state::SimdLength, StaticSimdLen,
+                                     1u, TId == 0, ident,
+                                     /*ForceTeamState=*/true);
     state::ValueRAII ActiveLevelRAII(icv::ActiveLevel, 1u, 0u, TId == 0, ident,
                                      /*ForceTeamState=*/true);
     state::ValueRAII LevelRAII(icv::Level, 1u, 0u, TId == 0, ident,
@@ -141,6 +150,8 @@ extern "C" {
   return;
 }
 
+
+
 [[clang::always_inline]] void
 __kmpc_parallel_51(IdentTy *ident, int32_t, int32_t if_expr,
                    int32_t num_threads, int proc_bind, void *fn,
@@ -167,6 +178,7 @@ __kmpc_parallel_51(IdentTy *ident, int32_t, int32_t if_expr,
   ASSERT(state::HasThreadState == false, nullptr);
 
   uint32_t NumThreads = determineNumberOfThreads(num_threads);
+  NumThreads = NumThreads / StaticSimdLen;
   uint32_t MaxTeamThreads = mapping::getMaxTeamThreads();
   uint32_t PTeamSize = NumThreads == MaxTeamThreads ? 0 : NumThreads;
   if (mapping::isSPMDMode()) {
@@ -259,6 +271,9 @@ __kmpc_parallel_51(IdentTy *ident, int32_t, int32_t if_expr,
     state::ValueRAII ParallelTeamSizeRAII(state::ParallelTeamSize, PTeamSize,
                                           1u, true, ident,
                                           /*ForceTeamState=*/true);
+    state::ValueRAII SimdLengthRAII(state::SimdLength, StaticSimdLen,
+                                     1u, TId == 0, ident,
+                                     /*ForceTeamState=*/true);
     state::ValueRAII ParallelRegionFnRAII(state::ParallelRegionFn, wrapper_fn,
                                           (void *)nullptr, true, ident,
                                           /*ForceTeamState=*/true);

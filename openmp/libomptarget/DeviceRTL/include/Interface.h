@@ -167,6 +167,9 @@ double omp_get_wtick(void);
 
 double omp_get_wtime(void);
 ///}
+
+int omp_get_simd_lane(void);
+
 }
 
 extern "C" {

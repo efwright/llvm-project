@@ -52,6 +52,7 @@
 
 #define FTN_SET_NUM_THREADS omp_set_num_threads
 #define FTN_GET_NUM_THREADS omp_get_num_threads
+#define FTN_GET_NUM_THREADS omp_get_simd_lane
 #define FTN_GET_MAX_THREADS omp_get_max_threads
 #define FTN_GET_THREAD_NUM omp_get_thread_num
 #define FTN_GET_NUM_PROCS omp_get_num_procs
@@ -189,6 +190,7 @@
 
 #define FTN_SET_NUM_THREADS omp_set_num_threads_
 #define FTN_GET_NUM_THREADS omp_get_num_threads_
+#define FTN_GET_NUM_THREADS omp_get_simd_lane_
 #define FTN_GET_MAX_THREADS omp_get_max_threads_
 #define FTN_GET_THREAD_NUM omp_get_thread_num_
 #define FTN_GET_NUM_PROCS omp_get_num_procs_

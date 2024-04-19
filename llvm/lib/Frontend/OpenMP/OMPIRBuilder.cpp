@@ -1796,8 +1796,8 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
 
       CI->eraseFromParent();
 
-      //for (Instruction *I : ToBeDeleted)
-      //  I->eraseFromParent();
+      for (Instruction *I : ToBeDeleted)
+        I->eraseFromParent();
 
     };
 
@@ -1806,7 +1806,7 @@ IRBuilder<>::InsertPoint OpenMPIRBuilder::createSimdLoop(
 
 
 // Outline 2
-  {
+  if(false) { // if(!SPMD) {
     OutlineInfo OI;
 
     OI.OuterAllocaBB = OuterAllocaBlock;

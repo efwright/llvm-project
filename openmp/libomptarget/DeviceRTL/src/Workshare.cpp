@@ -474,7 +474,11 @@ void SimdLoop(
   void **Args
 ) {
   ASSERT(WorkFn, "expected valid outlined function"); 
-  for(IType omp_iv = 0; omp_iv < TripCount; omp_iv++) {
+  //for(IType omp_iv = 0; omp_iv < TripCount; omp_iv++) {
+  for(IType omp_iv = (IType) mapping::getSimdLane();
+      omp_iv < TripCount;
+      omp_iv += mapping::getSimdLen()
+  ) {
     ((void (*)(IType, void**))WorkFn)(omp_iv, Args);
   }
   
