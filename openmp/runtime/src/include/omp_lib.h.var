@@ -293,6 +293,11 @@
           integer (kind=omp_integer_kind) omp_get_num_threads
         end function omp_get_num_threads
 
+        function omp_get_simd_lane() bind(c)
+          import
+          integer (kind=omp_integer_kind) omp_get_simd_lane
+        end function omp_get_simd_lane
+
         function omp_get_max_threads() bind(c)
           import
           integer (kind=omp_integer_kind) omp_get_max_threads
@@ -1018,6 +1023,7 @@
 !DIR$ ATTRIBUTES OFFLOAD:MIC :: omp_set_dynamic
 !DIR$ ATTRIBUTES OFFLOAD:MIC :: omp_set_nested
 !DIR$ ATTRIBUTES OFFLOAD:MIC :: omp_get_num_threads
+!DIR$ ATTRIBUTES OFFLOAD:MIC :: omp_get_simd_lane
 !DIR$ ATTRIBUTES OFFLOAD:MIC :: omp_get_max_threads
 !DIR$ ATTRIBUTES OFFLOAD:MIC :: omp_get_thread_num
 !DIR$ ATTRIBUTES OFFLOAD:MIC :: omp_get_num_procs
@@ -1101,6 +1107,7 @@
 !$omp declare target(omp_set_dynamic )
 !$omp declare target(omp_set_nested )
 !$omp declare target(omp_get_num_threads )
+!$omp declare target(omp_get_simd_lane )
 !$omp declare target(omp_get_max_threads )
 !$omp declare target(omp_get_thread_num )
 !$omp declare target(omp_get_num_procs )
