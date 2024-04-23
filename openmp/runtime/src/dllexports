@@ -288,7 +288,7 @@
 
     # These functions are for testing purposes. There is no need in stable ordinal number:
     __kmp_get_reduce_method
-
+    __kmpc_simd_barrier
 %endif  # not defined stub
 
 kmpc_calloc                                 200

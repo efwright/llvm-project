@@ -2708,8 +2708,9 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
 
       auto *LoopVarRef = CL->getLoopVarRef();
       LValue LCVal = EmitLValue(LoopVarRef);
-      Address LoopVarAddress = LCVal.getAddress(*this);
-      LoopVar = dyn_cast<llvm::Instruction>(LoopVarAddress.getPointer());
+      //Address LoopVarAddress = LCVal.getAddress(*this);
+      //LoopVar = dyn_cast<llvm::Instruction>(LoopVarAddress.getPointer());
+      LoopVar = dyn_cast<llvm::Instruction>(LCVal.getPointer(*this));
       LoopVarName = LoopVarRef->getNameInfo().getAsString();
 
       // Emit the distance func from the CanonicalLoop
@@ -2722,7 +2723,9 @@ void CodeGenFunction::EmitOMPSimdDirective(const OMPSimdDirective &S) {
                            ->getType()
                            .getNonReferenceType();
 
-      Address CountAddr = CreateMemTemp(LogicalTy, ".count.addr");
+      //Address CountAddr = CreateMemTemp(LogicalTy, ".count.addr");
+      RawAddress CountAddr = CreateMemTemp(LogicalTy, ".count.addr");
+ 
       emitCapturedStmtCall(*this, DistanceClosure, {CountAddr.getPointer()});
       auto *TripCount = Builder.CreateLoad(CountAddr, ".count");
 

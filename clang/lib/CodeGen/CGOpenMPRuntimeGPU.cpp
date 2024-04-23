@@ -504,6 +504,31 @@ public:
 };
 } // anonymous namespace
 
+/// Get the id of the warp in the block.
+///// We assume that the warp size is 32, which is always the case
+///// on the NVPTX device, to generate more efficient code.
+static llvm::Value *getNVPTXWarpID(CodeGenFunction &CGF) {
+  CGBuilderTy &Bld = CGF.Builder;
+  unsigned LaneIDBits =
+    llvm::Log2_32(CGF.getTarget().getGridValue().GV_Warp_Size);
+   auto &RT = static_cast<CGOpenMPRuntimeGPU &>(CGF.CGM.getOpenMPRuntime());
+   return Bld.CreateAShr(RT.getGPUThreadID(CGF), LaneIDBits, "nvptx_warp_id");
+}
+               
+/// Get the id of the current lane in the Warp.
+/// We assume that the warp size is 32, which is always the case
+/// on the NVPTX device, to generate more efficient code.
+static llvm::Value *getNVPTXLaneID(CodeGenFunction &CGF) {
+  CGBuilderTy &Bld = CGF.Builder;
+  unsigned LaneIDBits =
+    llvm::Log2_32(CGF.getTarget().getGridValue().GV_Warp_Size);
+  assert(LaneIDBits < 32 && "Invalid LaneIDBits size in NVPTX device.");
+  unsigned LaneIDMask = ~0u >> (32u - LaneIDBits);
+  auto &RT = static_cast<CGOpenMPRuntimeGPU &>(CGF.CGM.getOpenMPRuntime());
+  return Bld.CreateAnd(RT.getGPUThreadID(CGF), Bld.getInt32(LaneIDMask),
+                       "nvptx_lane_id");
+}
+
 CGOpenMPRuntimeGPU::ExecutionMode
 CGOpenMPRuntimeGPU::getExecutionMode() const {
   return CurrentExecutionMode;
@@ -2825,10 +2850,10 @@ void CGOpenMPRuntimeGPU::emitReduction(
     ElementType = CGF.ConvertTypeForMem(Private->getType());
     const auto *RHSVar =
         cast<VarDecl>(cast<DeclRefExpr>(RHSExprs[Idx])->getDecl());
-    PrivateVariable = CGF.GetAddrOfLocalVar(RHSVar).getPointer();
+    PrivateVariable = CGF.GetAddrOfLocalVar(RHSVar).getBasePointer();
     const auto *LHSVar =
         cast<VarDecl>(cast<DeclRefExpr>(LHSExprs[Idx])->getDecl());
-    Variable = CGF.GetAddrOfLocalVar(LHSVar).getPointer();
+    Variable = CGF.GetAddrOfLocalVar(LHSVar).getBasePointer();
     llvm::OpenMPIRBuilder::EvaluationKindTy EvalKind;
     switch (CGF.getEvaluationKind(Private->getType())) {
     case TEK_Scalar:
@@ -2850,10 +2875,10 @@ void CGOpenMPRuntimeGPU::emitReduction(
 
       *LHSPtr = CGF.GetAddrOfLocalVar(
                        cast<VarDecl>(cast<DeclRefExpr>(LHSExprs[I])->getDecl()))
-                    .getPointer();
+                    .getBasePointer();
       *RHSPtr = CGF.GetAddrOfLocalVar(
                        cast<VarDecl>(cast<DeclRefExpr>(RHSExprs[I])->getDecl()))
-                    .getPointer();
+                    .getBasePointer();
 
       emitSingleReductionCombiner(CGF, ReductionOps[I], Privates[I],
                                   cast<DeclRefExpr>(LHSExprs[I]),
@@ -3470,3 +3495,11 @@ llvm::Value *CGOpenMPRuntimeGPU::getGPUThreadID(CodeGenFunction &CGF) {
           CGM.getModule(), OMPRTL___kmpc_get_hardware_thread_id_in_block),
       Args);
 }
+
+llvm::Value *CGOpenMPRuntimeGPU::getGPUWarpSize(CodeGenFunction &CGF) {
+  ArrayRef<llvm::Value *> Args{};
+  return CGF.EmitRuntimeCall(OMPBuilder.getOrCreateRuntimeFunction(
+                                 CGM.getModule(), OMPRTL___kmpc_get_warp_size),
+                             Args);
+}
+

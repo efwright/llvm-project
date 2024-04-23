@@ -266,6 +266,8 @@ int32_t __kmpc_cancel_barrier(IdentTy *Loc_ref, int32_t TId);
 
 void __kmpc_barrier(IdentTy *Loc_ref, int32_t TId);
 
+void __kmpc_simd_barrier(void);
+
 void __kmpc_barrier_simple_spmd(IdentTy *Loc_ref, int32_t TId);
 
 void __kmpc_barrier_simple_generic(IdentTy *Loc_ref, int32_t TId);

@@ -796,6 +796,10 @@ void __kmpc_barrier(ident_t *loc, kmp_int32 global_tid) {
 #endif
 }
 
+void __kmpc_simd_barrier(void) {
+
+}
+
 /* The BARRIER for a MASTER section is always explicit   */
 /*!
 @ingroup WORK_SHARING

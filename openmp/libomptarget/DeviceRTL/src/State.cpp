@@ -207,7 +207,6 @@ void state::TeamStateTy::init(bool IsSPMD) {
   ICVState.RunSchedVar = omp_sched_static;
   ICVState.RunSchedChunkVar = 1;
   ParallelTeamSize = 1;
-  SimdLength = 1;
   HasThreadState = false;
   ParallelRegionFnVar = nullptr;
 }
@@ -215,14 +214,12 @@ void state::TeamStateTy::init(bool IsSPMD) {
 bool state::TeamStateTy::operator==(const TeamStateTy &Other) const {
   return (ICVState == Other.ICVState) &
          (HasThreadState == Other.HasThreadState) &
-         (ParallelTeamSize == Other.ParallelTeamSize) &
-         (SimdLength == Other.SimdLength);
+         (ParallelTeamSize == Other.ParallelTeamSize);
 }
 
 void state::TeamStateTy::assertEqual(TeamStateTy &Other) const {
   ICVState.assertEqual(Other.ICVState);
   ASSERT(ParallelTeamSize == Other.ParallelTeamSize, nullptr);
-  ASSERT(SimdLength == Other.SimdLength, nullptr);
   ASSERT(HasThreadState == Other.HasThreadState, nullptr);
 }
 

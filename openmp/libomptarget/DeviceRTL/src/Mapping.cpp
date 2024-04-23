@@ -323,7 +323,7 @@ uint32_t mapping::getNumberOfProcessorElements() {
 }
 
 uint32_t mapping::getSimdLen() {
-  state::SimdLength;
+  return 32;
 }
 
 uint32_t mapping::getSimdGroup() {
