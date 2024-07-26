@@ -422,11 +422,13 @@ AsyncInfoWrapperTy::AsyncInfoWrapperTy(GenericDeviceTy &Device,
 void AsyncInfoWrapperTy::finalize(Error &Err) {
   assert(AsyncInfoPtr && "AsyncInfoWrapperTy already finalized");
 
+  static BoolEnvar ForceSynchronize("LIBOMPTARGET_FORCE_SYNCHRONIZE");
+
   // If we used a local async info object we want synchronous behavior. In that
   // case, and assuming the current status code is correct, we will synchronize
   // explicitly when the object is deleted. Update the error with the result of
   // the synchronize operation.
-  if (AsyncInfoPtr == &LocalAsyncInfo && LocalAsyncInfo.Queue && !Err)
+  if ((ForceSynchronize || AsyncInfoPtr == &LocalAsyncInfo) && LocalAsyncInfo.Queue && !Err)
     Err = Device.synchronize(&LocalAsyncInfo);
 
   // Invalidate the wrapper object.

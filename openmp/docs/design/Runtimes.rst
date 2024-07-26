@@ -1228,6 +1228,7 @@ There are several environment variables to change the behavior of the plugins:
 * ``LIBOMPTARGET_AMDGPU_MAX_ASYNC_COPY_BYTES``
 * ``LIBOMPTARGET_AMDGPU_NUM_INITIAL_HSA_SIGNALS``
 * ``LIBOMPTARGET_AMDGPU_STREAM_BUSYWAIT``
+* ``LIBOMPTARGET_FORCE_SYNCHRONIZE``
 
 The environment variables ``LIBOMPTARGET_SHARED_MEMORY_SIZE``,
 ``LIBOMPTARGET_STACK_SIZE`` and ``LIBOMPTARGET_HEAP_SIZE`` are described in
@@ -1327,6 +1328,14 @@ This environment variable controls the timeout hint in microseconds for the
 HSA wait state within the AMDGPU plugin. For the duration of this value
 the HSA runtime may busy wait. This can reduce overall latency.
 The default value is ``2000000``.
+
+LIBOMPTARGET_FORCE_SYNCHRONIZE
+""""""""""""""""""""""""""""""
+
+This environment variable causes the NextGen plugin to synchronize immediately
+after a kernel is launched or after a data transfer, instead of the default
+behavior. Doing so aims to make identifying the source of code crashes
+easier. The default value is ``false``.
 
 .. _remote_offloading_plugin:
 
