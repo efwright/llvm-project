@@ -38,6 +38,7 @@ extern "C" int printf(const char *Format, ...) {
 #endif // OMPTARGET_HAS_LIBC
 
 extern "C" {
+
 [[gnu::weak]] int memcmp(const void *lhs, const void *rhs, size_t count) {
   auto *L = reinterpret_cast<const unsigned char *>(lhs);
   auto *R = reinterpret_cast<const unsigned char *>(rhs);
