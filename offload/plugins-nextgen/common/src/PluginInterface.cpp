@@ -422,14 +422,14 @@ AsyncInfoWrapperTy::AsyncInfoWrapperTy(GenericDeviceTy &Device,
 void AsyncInfoWrapperTy::finalize(Error &Err) {
   assert(AsyncInfoPtr && "AsyncInfoWrapperTy already finalized");
 
-  static BoolEnvar ForceSynchronize("LIBOMPTARGET_FORCE_SYNCHRONIZE");
-
   // If we used a local async info object we want synchronous behavior. In that
   // case, and assuming the current status code is correct, we will synchronize
   // explicitly when the object is deleted. Update the error with the result of
   // the synchronize operation.
-  if ((ForceSynchronize || AsyncInfoPtr == &LocalAsyncInfo) && LocalAsyncInfo.Queue && !Err)
+  if (AsyncInfoPtr == &LocalAsyncInfo && LocalAsyncInfo.Queue && !Err)
+  {
     Err = Device.synchronize(&LocalAsyncInfo);
+  }
 
   // Invalidate the wrapper object.
   AsyncInfoPtr = nullptr;
@@ -1455,8 +1455,27 @@ Error GenericDeviceTy::dataDelete(void *TgtPtr, TargetAllocTy Kind) {
   return Plugin::success();
 }
 
+/// Scoped locking mehcanism for the device. The locks only happens
+/// if the LIBOMPTARGET_FORCE_SYNCHRONIZE environment variable is set.
+struct ScopedDeviceLock
+{
+  public:
+    ScopedDeviceLock(std::shared_mutex& DeviceMutex) : Mutex(DeviceMutex) {
+      if(ForceSynchronize) Mutex.lock();
+    }
+    ~ScopedDeviceLock() {
+      if(ForceSynchronize) Mutex.unlock();
+    }
+  private:
+    std::shared_mutex& Mutex;
+    const BoolEnvar ForceSynchronize = BoolEnvar("LIBOMPTARGET_FORCE_SYNCHRONIZE", false);
+};
+
+
 Error GenericDeviceTy::dataSubmit(void *TgtPtr, const void *HstPtr,
                                   int64_t Size, __tgt_async_info *AsyncInfo) {
+  ScopedDeviceLock Lock(Mutex);
+
   AsyncInfoWrapperTy AsyncInfoWrapper(*this, AsyncInfo);
 
   auto Err = dataSubmitImpl(TgtPtr, HstPtr, Size, AsyncInfoWrapper);
@@ -1466,6 +1485,8 @@ Error GenericDeviceTy::dataSubmit(void *TgtPtr, const void *HstPtr,
 
 Error GenericDeviceTy::dataRetrieve(void *HstPtr, const void *TgtPtr,
                                     int64_t Size, __tgt_async_info *AsyncInfo) {
+  ScopedDeviceLock Lock(Mutex);
+      
   AsyncInfoWrapperTy AsyncInfoWrapper(*this, AsyncInfo);
 
   auto Err = dataRetrieveImpl(HstPtr, TgtPtr, Size, AsyncInfoWrapper);
@@ -1476,6 +1497,8 @@ Error GenericDeviceTy::dataRetrieve(void *HstPtr, const void *TgtPtr,
 Error GenericDeviceTy::dataExchange(const void *SrcPtr, GenericDeviceTy &DstDev,
                                     void *DstPtr, int64_t Size,
                                     __tgt_async_info *AsyncInfo) {
+  ScopedDeviceLock Lock(Mutex);
+ 
   AsyncInfoWrapperTy AsyncInfoWrapper(*this, AsyncInfo);
 
   auto Err = dataExchangeImpl(SrcPtr, DstDev, DstPtr, Size, AsyncInfoWrapper);
@@ -1487,6 +1510,9 @@ Error GenericDeviceTy::launchKernel(void *EntryPtr, void **ArgPtrs,
                                     ptrdiff_t *ArgOffsets,
                                     KernelArgsTy &KernelArgs,
                                     __tgt_async_info *AsyncInfo) {
+
+  ScopedDeviceLock Lock(Mutex);
+
   AsyncInfoWrapperTy AsyncInfoWrapper(
       *this,
       Plugin.getRecordReplay().isRecordingOrReplaying() ? nullptr : AsyncInfo);
