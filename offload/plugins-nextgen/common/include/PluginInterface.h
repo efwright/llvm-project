@@ -1032,7 +1032,7 @@ private:
       BoolEnvar("LIBOMPTARGET_REUSE_BLOCKS_FOR_HIGH_TRIP_COUNT", true);
 
   /// The mutex to force GPU synchronization.
-  mutable std::shared_mutex Mutex;
+  std::shared_mutex Mutex;
 
 protected:
   /// Environment variables defined by the LLVM OpenMP implementation

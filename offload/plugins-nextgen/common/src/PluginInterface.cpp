@@ -1457,24 +1457,25 @@ Error GenericDeviceTy::dataDelete(void *TgtPtr, TargetAllocTy Kind) {
 
 /// Scoped locking mehcanism for the device. The locks only happens
 /// if the LIBOMPTARGET_FORCE_SYNCHRONIZE environment variable is set.
-struct ScopedDeviceLock
+struct UserForcedScopedDeviceLock
 {
   public:
-    ScopedDeviceLock(std::shared_mutex& DeviceMutex) : Mutex(DeviceMutex) {
-      if(ForceSynchronize) Mutex.lock();
+    UserForcedScopedDeviceLock(std::shared_mutex& DeviceMutex) : Mutex(DeviceMutex) {
+      static BoolEnvar ForceSynchronize("LIBOMPTARGET_FORCE_SYNCHRONIZE", false);
+      Active = ForceSynchronize;
+      if(Active) Mutex.lock();
     }
-    ~ScopedDeviceLock() {
-      if(ForceSynchronize) Mutex.unlock();
+    ~UserForcedScopedDeviceLock() {
+      if(Active) Mutex.unlock();
     }
   private:
     std::shared_mutex& Mutex;
-    const BoolEnvar ForceSynchronize = BoolEnvar("LIBOMPTARGET_FORCE_SYNCHRONIZE", false);
+    bool Active;
 };
-
 
 Error GenericDeviceTy::dataSubmit(void *TgtPtr, const void *HstPtr,
                                   int64_t Size, __tgt_async_info *AsyncInfo) {
-  ScopedDeviceLock Lock(Mutex);
+  UserForcedScopedDeviceLock Lock(Mutex);
 
   AsyncInfoWrapperTy AsyncInfoWrapper(*this, AsyncInfo);
 
@@ -1485,7 +1486,7 @@ Error GenericDeviceTy::dataSubmit(void *TgtPtr, const void *HstPtr,
 
 Error GenericDeviceTy::dataRetrieve(void *HstPtr, const void *TgtPtr,
                                     int64_t Size, __tgt_async_info *AsyncInfo) {
-  ScopedDeviceLock Lock(Mutex);
+  UserForcedScopedDeviceLock Lock(Mutex);
       
   AsyncInfoWrapperTy AsyncInfoWrapper(*this, AsyncInfo);
 
@@ -1497,7 +1498,7 @@ Error GenericDeviceTy::dataRetrieve(void *HstPtr, const void *TgtPtr,
 Error GenericDeviceTy::dataExchange(const void *SrcPtr, GenericDeviceTy &DstDev,
                                     void *DstPtr, int64_t Size,
                                     __tgt_async_info *AsyncInfo) {
-  ScopedDeviceLock Lock(Mutex);
+  UserForcedScopedDeviceLock Lock(Mutex);
  
   AsyncInfoWrapperTy AsyncInfoWrapper(*this, AsyncInfo);
 
@@ -1511,7 +1512,7 @@ Error GenericDeviceTy::launchKernel(void *EntryPtr, void **ArgPtrs,
                                     KernelArgsTy &KernelArgs,
                                     __tgt_async_info *AsyncInfo) {
 
-  ScopedDeviceLock Lock(Mutex);
+  UserForcedScopedDeviceLock Lock(Mutex);
 
   AsyncInfoWrapperTy AsyncInfoWrapper(
       *this,
