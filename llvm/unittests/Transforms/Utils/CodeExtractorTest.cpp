@@ -16,6 +16,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Support/SourceMgr.h"
 #include "gtest/gtest.h"
@@ -27,6 +28,14 @@ BasicBlock *getBlockByName(Function *F, StringRef name) {
   for (auto &BB : *F)
     if (BB.getName() == name)
       return &BB;
+  return nullptr;
+}
+
+AllocaInst *getAllocaByName(Function *F, StringRef name) {
+  for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)
+    if(auto Alloca = dyn_cast<AllocaInst>(&*I))
+      if(Alloca->hasName() && Alloca->getName() == name)
+        return Alloca;
   return nullptr;
 }
 
@@ -614,5 +623,76 @@ TEST(CodeExtractor, OpenMPAggregateArgs) {
             PointerType::get(M->getContext(), 0));
   EXPECT_FALSE(verifyFunction(*Outlined));
   EXPECT_FALSE(verifyFunction(*Func));
+}
+
+TEST(CodeExtractor, AddrSpaceCastStructArg) {
+  LLVMContext Ctx;
+  SMDiagnostic Err;
+  std::unique_ptr<Module> M(parseAssemblyString(R"ir(
+    target datalayout = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32-p7:160:256:256:32-p8:128:128-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5-G1-ni:7:8:9"
+    target triple = "amdgcn-amd-amdhsa"
+
+    define void @foo() {
+      %1 = alloca i32, align 4, addrspace(5)
+      %2 = addrspacecast ptr addrspace(5) %1 to ptr
+      store i32 0, ptr %2, align 4
+      br label %entry
+
+    entry:
+      br label %extract
+
+    extract:
+      %3 = load i32, ptr %2, align 4
+      %4 = add nsw i32 %3, 1
+      br label %exit
+
+    exit:
+      ret void
+    }
+  )ir",
+                                                Err, Ctx));
+  Function *Func = M->getFunction("foo");
+  SmallVector<BasicBlock *, 1> Blocks{getBlockByName(Func, "extract")};
+
+  // Create the CodeExtractor with arguments aggregation enabled.
+  // Outlined function argument should be declared in 0 address space
+  // even if the default alloca address space is 5.
+  CodeExtractor CE(Blocks, /* DominatorTree */ nullptr,
+                   /* AggregateArgs */ true,
+		   /* BlockFrequencyInfo */ nullptr,
+                   /* BranchProbabilityInfo */ nullptr,
+                   /* AssumptionCache */ nullptr,
+                   /* AllowVarArgs */ true,
+                   /* AllowAlloca */ true,
+                   /* AllocaBlock*/ &Func->getEntryBlock(),
+                   /* Suffix */ ".outlined",
+                   /* ArgsInZeroAddressSpace */ true);
+
+  EXPECT_TRUE(CE.isEligible());
+
+  CodeExtractorAnalysisCache CEAC(*Func);
+  SetVector<Value *> Inputs, Outputs, SinkingCands, HoistingCands;
+  BasicBlock *CommonExit = nullptr;
+  CE.findAllocas(CEAC, SinkingCands, HoistingCands, CommonExit);
+  CE.findInputsOutputs(Inputs, Outputs, SinkingCands);
+
+  Function *Outlined = CE.extractCodeRegion(CEAC, Inputs, Outputs);
+  EXPECT_TRUE(Outlined);
+  EXPECT_EQ(Outlined->arg_size(), 1U);
+  EXPECT_FALSE(verifyFunction(*Outlined));
+  EXPECT_FALSE(verifyFunction(*Func));
+
+  // The function should have an alloca called structArg
+  // in address space 5.
+  AllocaInst *Struct = getAllocaByName(Func, "structArg");
+  EXPECT_TRUE(Struct);
+  EXPECT_EQ(Struct->getAddressSpace(), 5U);
+
+  // structArg should have only one use, the AddressSpaceCast.
+  EXPECT_TRUE(Struct->hasOneUse());
+  AddrSpaceCastInst *StructCasted =
+    dyn_cast<AddrSpaceCastInst>(Struct->user_back());
+  EXPECT_TRUE(StructCasted);
+  EXPECT_EQ(StructCasted->getDestAddressSpace(), 0U);
 }
 } // end anonymous namespace
